@@ -26,8 +26,11 @@ const {
 const fs = require('fs');
 const yts = require('yt-search');
 const path = require('path');
+const { promisify } = require('util');
 const pino = require('pino');
+const execFileAsync = promisify(execFile);
 const exec = require('child_process').exec;
+const { execFile } = require('child_process');
 const os = require('os');
 const https = require('https');
 const { PassThrough } = require('stream');
@@ -2859,49 +2862,70 @@ case 'antitagadmin': {
             }
 
 
+   
 case 'stiker':
 case 'sticker':
 case 's': {
+    const unwrap = (message) => {
+        while (message) {
+            if (message.ephemeralMessage?.message) {
+                message = message.ephemeralMessage.message;
+                continue;
+            }
+            if (message.viewOnceMessage?.message) {
+                message = message.viewOnceMessage.message;
+                continue;
+            }
+            if (message.viewOnceMessageV2?.message) {
+                message = message.viewOnceMessageV2.message;
+                continue;
+            }
+            break;
+        }
+        return message;
+    };
+
+    const currentMessage = unwrap(msg.message);
+
     const quotedContext =
-        msg.message?.extendedTextMessage?.contextInfo?.quotedMessage ||
-        msg.message?.imageMessage?.contextInfo?.quotedMessage ||
-        msg.message?.videoMessage?.contextInfo?.quotedMessage;
+        currentMessage?.extendedTextMessage?.contextInfo?.quotedMessage ||
+        currentMessage?.imageMessage?.contextInfo?.quotedMessage ||
+        currentMessage?.videoMessage?.contextInfo?.quotedMessage;
 
     const getMedia = (message) => {
+        message = unwrap(message);
         if (!message) return null;
 
-        if (message.ephemeralMessage?.message)
-            return getMedia(message.ephemeralMessage.message);
-
-        if (message.viewOnceMessage?.message)
-            return getMedia(message.viewOnceMessage.message);
-
-        if (message.viewOnceMessageV2?.message)
-            return getMedia(message.viewOnceMessageV2.message);
-
-        if (message.imageMessage)
+        if (message.imageMessage) {
             return { data: message.imageMessage, type: 'image' };
+        }
 
-        if (message.videoMessage)
+        if (message.videoMessage) {
             return { data: message.videoMessage, type: 'video' };
+        }
 
         return null;
     };
 
     const media =
-        getMedia(msg.message) ||
+        getMedia(currentMessage) ||
         getMedia(quotedContext);
 
     if (!media) {
-        return sock.sendMessage(from, {
+        await sock.sendMessage(from, {
             text: '📌 Reply to an image or video, or send one with .sticker'
         }, { quoted: msg });
+        break;
     }
 
     let tempIn;
     let tempOut;
 
     try {
+        if (!ffmpegPath) {
+            throw new Error('FFmpeg binary is unavailable.');
+        }
+
         await sock.sendMessage(from, {
             text: '🎨 Creating your sticker...'
         }, { quoted: msg });
@@ -2923,10 +2947,17 @@ case 's': {
             throw new Error('Media download was empty.');
         }
 
-        const id = Date.now() + '_' + Math.floor(Math.random() * 10000);
+        // Prevent excessively large uploads.
+        if (buffer.length > 25 * 1024 * 1024) {
+            throw new Error('Media is too large. Maximum size is 25MB.');
+        }
 
-        tempIn = `./temp_sticker_${id}.${media.type === 'image' ? 'img' : 'mp4'}`;
-        tempOut = `./temp_sticker_${id}.webp`;
+        const id = crypto.randomUUID();
+        tempIn = path.join(
+            os.tmpdir(),
+            `gd_sticker_${id}.${media.type === 'image' ? 'img' : 'mp4'}`
+        );
+        tempOut = path.join(os.tmpdir(), `gd_sticker_${id}.webp`);
 
         fs.writeFileSync(tempIn, buffer);
 
@@ -2934,38 +2965,46 @@ case 's': {
             '-y',
             '-i', tempIn,
             '-vf',
-            'scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000,fps=15',
-            '-vcodec', 'libwebp',
-            '-lossless', '0',
-            '-q:v', '60',
-            '-compression_level', '6',
-            '-preset', 'default',
-            '-an'
+            'scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000'
         ];
 
         if (media.type === 'video') {
             ffmpegArgs.push(
                 '-t', '6',
+                '-vf',
+                'fps=15,scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000',
                 '-loop', '0',
-                '-vsync', '0',
-                '-pix_fmt', 'yuva420p'
+                '-vsync', '0'
             );
         } else {
-            ffmpegArgs.push(
-                '-frames:v', '1',
-                '-pix_fmt', 'yuva420p'
-            );
+            ffmpegArgs.push('-frames:v', '1');
         }
 
-        ffmpegArgs.push(tempOut);
+        ffmpegArgs.push(
+            '-an',
+            '-c:v', 'libwebp',
+            '-lossless', '0',
+            '-q:v', '55',
+            '-compression_level', '6',
+            '-pix_fmt', 'yuva420p',
+            '-f', 'webp',
+            tempOut
+        );
 
-        await execFileAsync('ffmpeg', ffmpegArgs);
+        await execFileAsync(ffmpegPath, ffmpegArgs, {
+            timeout: 120000,
+            maxBuffer: 10 * 1024 * 1024
+        });
 
         if (!fs.existsSync(tempOut)) {
             throw new Error('Sticker file was not created.');
         }
 
         const stickerBuffer = fs.readFileSync(tempOut);
+
+        if (!stickerBuffer.length) {
+            throw new Error('Generated sticker is empty.');
+        }
 
         await sock.sendMessage(from, {
             sticker: stickerBuffer
@@ -2975,25 +3014,24 @@ case 's': {
         console.error('Sticker Error:', err);
 
         await sock.sendMessage(from, {
-            text: '❌ Sticker conversion failed. Make sure FFmpeg is installed and working on your server.'
+            text: '❌ Sticker conversion failed. Try another image or a shorter video.'
         }, { quoted: msg });
 
     } finally {
-        try {
-            if (tempIn && fs.existsSync(tempIn))
-                fs.unlinkSync(tempIn);
-
-            if (tempOut && fs.existsSync(tempOut))
-                fs.unlinkSync(tempOut);
-        } catch (cleanupError) {
-            console.error('Sticker cleanup error:', cleanupError);
+        for (const file of [tempIn, tempOut]) {
+            try {
+                if (file && fs.existsSync(file)) {
+                    fs.unlinkSync(file);
+                }
+            } catch (cleanupError) {
+                console.error('Sticker cleanup error:', cleanupError);
+            }
         }
     }
 
     break;
 }
-
-            
+       
             case 'toimg': {
                 const isSticker = msg.message?.stickerMessage || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.stickerMessage;
                 if (!isSticker) {
@@ -3132,179 +3170,6 @@ case 's': {
                 break;
             }
 
-
-        case 'play': {
-    const query = args.join(' ').trim();
-    if (!query) {
-        return sock.sendMessage(from, { text: '🎵 Enter a song name.\n\nExample: .play Calm Down' }, { quoted: msg });
-    }
-
-    let filePath = null;
-    const normalizePlayText = value => String(value || '').toLowerCase()
-        .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9]+/g, ' ').trim();
-    const extractAudioUrl = (value, depth = 0) => {
-        if (!value || depth > 6) return null;
-        if (typeof value === 'string') {
-            const candidate = value.trim();
-            if (/^https?:\/\//i.test(candidate) && !/\.(jpg|jpeg|png|webp)(\?|$)/i.test(candidate)) return candidate;
-            return null;
-        }
-        if (Array.isArray(value)) {
-            for (const item of value) {
-                const found = extractAudioUrl(item, depth + 1);
-                if (found) return found;
-            }
-            return null;
-        }
-        if (typeof value === 'object') {
-            const preferred = ['download_url', 'downloadUrl', 'dl_url', 'dl', 'audio_url', 'audioUrl', 'mp3', 'download', 'url', 'link', 'file', 'result', 'data'];
-            for (const key of preferred) {
-                if (value[key] !== undefined) {
-                    const found = extractAudioUrl(value[key], depth + 1);
-                    if (found) return found;
-                }
-            }
-            for (const [key, item] of Object.entries(value)) {
-                if (/thumb|image|poster|avatar/i.test(key)) continue;
-                const found = extractAudioUrl(item, depth + 1);
-                if (found) return found;
-            }
-        }
-        return null;
-    };
-
-    try {
-        await sock.sendMessage(from, { text: '🔎 Searching for your song...' }, { quoted: msg });
-        const search = await yts(query);
-        const video = search.videos?.[0];
-        if (!video) {
-            return sock.sendMessage(from, { text: '❌ Song not found. Try another title.' }, { quoted: msg });
-        }
-
-        const title = video.title || query;
-        const author = video.author?.name || video.author || 'Unknown artist';
-        const caption = '╔══〔 GREAT_DEMON V4 〕══╗\n║  ♫ AUDIO DOWNLOADER\n╚══════════════════╝\n\n◆ TITLE: ' + title +
-            '\n◆ DURATION: ' + (video.timestamp || 'Unknown') + '\n◆ AUTHOR: ' + author;
-        if (video.thumbnail) {
-            try {
-                await sock.sendMessage(from, { image: { url: video.thumbnail }, caption }, { quoted: msg });
-            } catch (_) {
-                await sock.sendMessage(from, { text: caption }, { quoted: msg });
-            }
-        } else {
-            await sock.sendMessage(from, { text: caption }, { quoted: msg });
-        }
-
-        await sock.sendMessage(from, { text: '⬇️ Checking audio sources...' }, { quoted: msg });
-        let audioUrl = null;
-        let sourceName = '';
-        let licenseNote = '';
-
-        // First choice: Jamendo, but only tracks whose API explicitly allows downloads.
-        const jamendoClientId = process.env.JAMENDO_CLIENT_ID;
-        if (jamendoClientId) {
-            try {
-                const jr = await axios.get('https://api.jamendo.com/v3.0/tracks/', {
-                    params: { client_id: jamendoClientId, format: 'json', limit: 20, search: query, audiodlformat: 'mp32', include: 'licenses' },
-                    timeout: 18000
-                });
-                const tokens = normalizePlayText(query).split(/\s+/).filter(Boolean);
-                const tracks = jr.data?.results || [];
-                const ranked = tracks.map(track => {
-                    const text = normalizePlayText((track.name || '') + ' ' + (track.artist_name || ''));
-                    const words = new Set(text.split(/\s+/));
-                    const score = tokens.length ? tokens.filter(t => words.has(t)).length / tokens.length : 0;
-                    return { track, score };
-                }).filter(x => x.track.audiodownload_allowed === true &&
-                    typeof x.track.audiodownload === 'string' && /^https:\/\//i.test(x.track.audiodownload) && x.score >= 0.5)
-                  .sort((a, b) => b.score - a.score);
-                if (ranked.length) {
-                    audioUrl = ranked[0].track.audiodownload;
-                    sourceName = 'Jamendo';
-                    licenseNote = 'Jamendo reported download permission for this track.';
-                }
-            } catch (e) {
-                console.warn('[PLAY JAMENDO FALLBACK]', e.message);
-            }
-        }
-
-        // Fallback providers copied as clean HTTP integrations from the supplied play.js.
-        // No code from the obfuscated file is executed or imported.
-        if (!audioUrl) {
-            const encoded = encodeURIComponent(video.url);
-            const providers = [
-                { name: 'DavidCyril', url: 'https://api.davidcyriltech.my.id/youtube/mp3?url=' + encoded },
-                { name: 'Ryzen', url: 'https://api.ryzendesu.vip/api/downloader/ytmp3?url=' + encoded },
-                { name: 'Gifted', url: 'https://api.giftedtech.co.ke/api/download/ytmp3?apikey=gifted&url=' + encoded }
-            ];
-            for (const provider of providers) {
-                try {
-                    const response = await axios.get(provider.url, {
-                        timeout: 25000,
-                        maxContentLength: 2 * 1024 * 1024,
-                        headers: { accept: 'application/json' }
-                    });
-                    const found = extractAudioUrl(response.data);
-                    if (found) {
-                        audioUrl = found;
-                        sourceName = provider.name;
-                        break;
-                    }
-                } catch (providerError) {
-                    console.warn('[PLAY PROVIDER FAILED]', provider.name, providerError.message);
-                }
-            }
-        }
-
-        if (!audioUrl) {
-            throw new Error('All configured audio sources failed or returned no download link. Check JAMENDO_CLIENT_ID and provider availability.');
-        }
-
-        filePath = path.join(os.tmpdir(), 'greatdemon_play_' + Date.now() + '.mp3');
-        const audioResponse = await axios.get(audioUrl, {
-            responseType: 'stream', timeout: 60000, maxRedirects: 5,
-            maxContentLength: 40 * 1024 * 1024,
-            validateStatus: status => status >= 200 && status < 300
-        });
-        const contentType = String(audioResponse.headers['content-type'] || '').toLowerCase();
-        if (contentType.includes('text/html') || contentType.includes('application/json')) {
-            audioResponse.data.destroy();
-            throw new Error('The provider returned a webpage or JSON instead of an audio file.');
-        }
-        await new Promise((resolve, reject) => {
-            const output = fs.createWriteStream(filePath);
-            audioResponse.data.on('error', reject);
-            output.on('error', reject);
-            output.on('finish', resolve);
-            audioResponse.data.pipe(output);
-        });
-        const size = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
-        if (size < 2048 || size > 40 * 1024 * 1024) throw new Error('Audio file was empty or exceeded the 40 MB limit.');
-
-        const safeTitle = title.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').slice(0, 100) || 'audio';
-        await sock.sendMessage(from, {
-            audio: fs.readFileSync(filePath),
-            mimetype: 'audio/mpeg',
-            fileName: safeTitle + '.mp3',
-            ptt: false
-        }, { quoted: msg });
-        await sock.sendMessage(from, {
-            text: '🎵 Audio sent successfully.\nSource: ' + sourceName + (licenseNote ? '\n' + licenseNote : '')
-        }, { quoted: msg });
-    } catch (error) {
-        console.error('[PLAY AUDIO ERROR]', error);
-        await sock.sendMessage(from, {
-            text: '❌ Could not send this audio.\n\n' + (error.message || 'Unknown provider error') +
-                '\n\nTry another song title or check the audio-provider status and credentials.'
-        }, { quoted: msg });
-    } finally {
-        if (filePath && fs.existsSync(filePath)) {
-            try { fs.unlinkSync(filePath); } catch (e) { console.warn('[PLAY CLEANUP]', e.message); }
-        }
-    }
-    break;
-}
 
             case 'yts': {
                 if (!q) return sock.sendMessage(from, { text: '💡 *My Lord, provide a search term: .yts <query>*' }, { quoted: msg });
