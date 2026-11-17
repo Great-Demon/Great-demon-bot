@@ -945,16 +945,18 @@ async function startDemonBot(options = {}) {
         // =========================================================================
         // 🔥 GLOBAL AUTO-REACT
         // =========================================================================
-        if (autoSettings.autoreact && !msg.key.fromMe) {
-            try {
-                const emojis = ['🔥', '⚡', '💀', '👑', '🖤', '⚔️', '⭐'];
-                const emoji = emojis[Math.floor(Math.random() * emojis.length)];
-
-                await sock.sendMessage(from, {
-                    react: { text: emoji, key: msg.key }
-                });
-            } catch (err) {}
+        // Global Auto-React Listener
+if (autoSettings?.autoreact && !mek.key.fromMe && mek.message) {
+    const emojis = ['🔥', '💀', '👑', '⚡', '😈', '🩸', '🖤'];
+    const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+    
+    await sock.sendMessage(from, {
+        react: {
+            text: randomEmoji,
+            key: mek.key
         }
+    });
+}
 
         // =========================================================================
         // 😂 QUOTE-REPLY MEME DETECTOR
@@ -2017,59 +2019,161 @@ case 'konachansfw': {
                 break;
             }
 
-            case 'gcstatus':
+            
+case 'gcstatus':
 case 'ggstatus':
 case 'gcast': {
-    if (!isOwner) return extra.reply('⚔️ *Only My Lord Demon Emperor can publish group status stories!*');
+    if (!isOwner) {
+        return extra.reply('⚔️ Only the Demon Emperor can publish Group Status V2!');
+    }
+
     const inviteUrl = String(q || '').trim();
-    const inviteMatch = inviteUrl.match(/(?:https?:\/\/)?chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/i);
-    if (!inviteMatch) {
-        return extra.reply('💡 *Usage:* .ggstatus https://chat.whatsapp.com/INVITECODE');
+    const match = inviteUrl.match(
+        /(?:https?:\/\/)?chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/i
+    );
+
+    if (!match) {
+        return extra.reply(
+            '❌ Usage:\n.ggstatus https://chat.whatsapp.com/INVITECODE'
+        );
     }
 
-    const inviteCode = inviteMatch[1];
-    let groupName = 'WhatsApp Group';
-    let groupJid = '0@s.whatsapp.net';
-
-    try {
-        const inviteInfo = await sock.groupGetInviteInfo(inviteCode);
-        if (inviteInfo?.subject) groupName = inviteInfo.subject;
-        if (inviteInfo?.id) groupJid = inviteInfo.id;
-    } catch (inviteError) {
-        console.warn('[GCSTATUS INVITE LOOKUP]', inviteError.message);
+    if (!sock.user?.id) {
+        return extra.reply('❌ WhatsApp is not connected.');
     }
 
-    await extra.reply('📣 *Publishing Group Status Story...*\nPosting invite card directly to your WhatsApp Status.');
-
     try {
-        // Post the group invite natively to your Status Story broadcast JID
-        await sock.sendMessage('status@broadcast', {
-            groupInviteMessage: {
-                inviteCode: inviteCode,
-                inviteExpiration: Date.now() + 86400000, // 24 hours expiry
-                groupJid: groupJid,
-                groupName: groupName,
-                caption: `🔥 Join our alliance: ${groupName}`
+        const inviteInfo = await sock.groupGetInviteInfo(match[1]);
+        const groupName = inviteInfo?.subject || 'WhatsApp Group';
+
+        const groups = await sock.groupFetchAllParticipating();
+        const groupJids = Object.keys(groups || {})
+            .filter(jid => jid.endsWith('@g.us'));
+
+        if (!groupJids.length) {
+            return extra.reply('❌ No participating groups found.');
+        }
+
+        await extra.reply(
+            `📡 Preparing Group Status V2...\n` +
+            `🏰 Groups found: ${groupJids.length}\n` +
+            `📌 Publishing invitation as status stories.`
+        );
+
+        const story = {
+            text:
+                `🔥 NEW GROUP INVITATION 🔥\n\n` +
+                `👑 ${groupName}\n\n` +
+                `🔗 ${inviteUrl}\n\n` +
+                `💀 Join our alliance!`,
+            backgroundColor: PURPLE_COLOR
+        };
+
+        let submitted = 0;
+        const failed = [];
+
+        for (const groupJid of groupJids) {
+            try {
+                const inside = await generateWAMessageContent(
+                    story,
+                    {
+                        upload: sock.waUploadToServer,
+                        backgroundColor: PURPLE_COLOR
+                    }
+                );
+
+                if (!inside || !Object.keys(inside).length) {
+                    throw new Error('Status content generation failed.');
+                }
+
+                const messageSecret = crypto.randomBytes(32);
+
+                const messageType = Object.keys(inside)[0];
+
+                if (inside[messageType] &&
+                    typeof inside[messageType] === 'object') {
+                    inside[messageType].contextInfo = {
+                        ...(inside[messageType].contextInfo || {}),
+                        isGroupStatus: true
+                    };
+                }
+
+                const statusMessage = generateWAMessageFromContent(
+                    groupJid,
+                    {
+                        messageContextInfo: {
+                            messageSecret
+                        },
+                        groupStatusMessageV2: {
+                            message: {
+                                ...inside,
+                                messageContextInfo: {
+                                    messageSecret
+                                }
+                            }
+                        }
+                    },
+                    {
+                        userJid: sock.user.id
+                    }
+                );
+
+                if (!statusMessage?.message || !statusMessage?.key?.id) {
+                    throw new Error('Group Status V2 message creation failed.');
+                }
+
+                await sock.relayMessage(
+                    groupJid,
+                    statusMessage.message,
+                    {
+                        messageId: statusMessage.key.id
+                    }
+                );
+
+                submitted++;
+
+            } catch (error) {
+                console.error(
+                    '[GROUP STATUS V2 FAILED]',
+                    groupJid,
+                    error
+                );
+
+                failed.push(
+                    `${groupJid}: ${error.message || 'Unknown error'}`
+                );
             }
-        }, {
-            statusJidList: Object.keys(sock.chats || {}) // Broadcasts to contacts viewing your status
-        });
 
-        const report = '╭━━〔 *GREAT DEMON V4 — STATUS REPORT* 〕━━╮\n' +
-            'TYPE: WHATSAPP STATUS STORY\n' +
-            'TARGET: status@broadcast\n' +
-            'SUCCESS: 100%\n' +
-            'STATUS: SUCCESSFULLY PUBLISHED TO STORY\n' +
-            'NOTE: Group invite card sent to status stories successfully.\n' +
-            '╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯';
-        await extra.reply(report);
+            await new Promise(resolve => setTimeout(resolve, 1200));
+        }
 
-    } catch (postError) {
-        console.error('[GCSTATUS STORY FAILED]', postError);
-        await extra.reply('❌ Failed to publish status story: ' + postError.message);
+        await extra.reply(
+            `╭━━━〔 👑 GREAT DEMON V4 〕━━━╮\n` +
+            `┃ 📡 GROUP STATUS V2 REPORT\n` +
+            `┣━━━━━━━━━━━━━━━━━━━━\n` +
+            `┃ 📤 Submitted: ${submitted}/${groupJids.length}\n` +
+            `┃ ❌ Failed: ${failed.length}\n` +
+            `┃ 🔗 Content: Group invitation\n` +
+            `┃ 📍 Destination: Participating groups\n` +
+            `╰━━━━━━━━━━━━━━━━━━━━╯\n\n` +
+            (
+                failed.length
+                    ? `Failed destinations:\n${failed.slice(0, 8).join('\n')}`
+                    : 'Relay requests completed. Actual status publication is not independently verified.'
+            )
+        );
+
+    } catch (error) {
+        console.error('[GGSTATUS ERROR]', error);
+
+        await extra.reply(
+            `❌ GROUP STATUS V2 FAILED\n\n${error.message}`
+        );
     }
+
     break;
 }
+
   
 case 'delgcstatus':
 case 'delgstatus':
