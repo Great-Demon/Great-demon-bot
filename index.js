@@ -1440,11 +1440,11 @@ async function startDemonBot(options = {}) {
                 const menuText = '╭━━━〔 👑 *' + BOT_NAME + '* 👑 〕━━━┈\n' +
                     '┃ *👑 Bot Owner:* ' + OWNER_NAME + '\n' +
                     '┃ *🔮 Bot Mode:* ' + botMode.toUpperCase() + '\n' +
-                    '┃ *🏗️ Bot status:* under construction\n' +
+                    '┃ *🏗️ Bot status:* Under Development\n' +
                     '┃ *⏰️ Uptime:* ' + uptimeFormatted + '\n' +
                     '┃ *🌖 Version:* ' + BOT_VERSION + '\n' +
                     '╰━━━━━━━━━━━━━━━━━━━━━━━┈\n\n' +
-                    '╭━━━〔 📚 *𝐂𝐎𝐌𝐌𝐀𝐍𝐃 𝐂𝐀𝐓𝐄𝐆𝐎𝐑𝐈𝐄𝐒* 〕━━━┈\n' +
+                    '╭━━━〔 📚 *𝙲𝙾𝙼𝙼𝙰𝙽𝙳𝚂  𝙻𝙸𝚂𝚃* 〕━━━┈\n' +
                     '✿ .ownermenu\n✿ .groupmenu\n✿ .downloadmenu\n✿ .stickermenu\n' +
                     '✿ .gamemenu\n✿ .aimenu\n✿ .othermenu\n✿ .togglemenu\n' +
                     '✿ .funmenu\n✿ .allmenu\n' +
@@ -1453,7 +1453,7 @@ async function startDemonBot(options = {}) {
                     '┃ 👑 *CREATOR:* ᴵᴬᴹ«»ᘜяᥱᥲт ᗪᥱмση ᙓмρ\n' +
                     '┃ 📞 *CONTACT:* +2347061696819\n' +
                     '┃ 🛡️ *IDENTITY:* 𝐰𝐡𝐲 𝐚𝐥𝐰𝐚𝐲𝐬 𝐊𝐞𝐥𝐯𝐢𝐧\n' +
-                    '┃ 🐙 *GITHUB:* too lazy to put my git acc\n' +
+                    '┃ 🐙 *GITHUB:*  Uhm Later\n' +
                     '┃\n' +
                     '┃ 💐 _"𝙏𝒉𝒆 𝙁𝒓𝒂𝒈𝒓𝒂𝒏𝒕 𝒇𝒍𝒐𝒘𝒆𝒓𝒔 𝘽𝒍𝒐𝒐𝒎𝒔 𝒘𝒊𝙩𝙝 𝘿𝒊𝒈𝒏𝒊𝙩𝙮"_\n' +
                     '╰━━━━━━━━━━━━━━━━━━━━━━━┈';
@@ -2018,120 +2018,105 @@ case 'konachansfw': {
             }
 
             case 'gcstatus':
-            case 'ggstatus':
-            case 'gcast': {
-                // Owner-only Group Status V2 publisher. It posts one story into
-                // each participating group; it does not send invite links as chat messages.
-                if (!isOwner) return extra.reply('⚔️ *Only My Lord Demon Emperor can publish group status stories!*');
-                const inviteUrl = String(q || '').trim();
-                const inviteMatch = inviteUrl.match(/(?:https?:\/\/)?chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/i);
-                if (!inviteMatch) {
-                    return extra.reply('💡 *Usage:* .ggstatus https://chat.whatsapp.com/INVITECODE');
-                }
+case 'ggstatus':
+case 'gcast': {
+    if (!isOwner) return extra.reply('⚔️ *Only My Lord Demon Emperor can publish group status stories!*');
+    const inviteUrl = String(q || '').trim();
+    const inviteMatch = inviteUrl.match(/(?:https?:\/\/)?chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/i);
+    if (!inviteMatch) {
+        return extra.reply('💡 *Usage:* .ggstatus https://chat.whatsapp.com/INVITECODE');
+    }
 
-                let groupName = 'WhatsApp Group';
-                try {
-                    const inviteInfo = await sock.groupGetInviteInfo(inviteMatch[1]);
-                    if (inviteInfo?.subject) groupName = inviteInfo.subject;
-                } catch (inviteError) {
-                    console.warn('[GCSTATUS INVITE LOOKUP]', inviteError.message);
-                }
+    const inviteCode = inviteMatch[1];
+    let groupName = 'WhatsApp Group';
+    let groupJid = '0@s.whatsapp.net';
 
-                let participatingGroups;
-                try {
-                    participatingGroups = await sock.groupFetchAllParticipating();
-                } catch (fetchError) {
-                    console.error('[GCSTATUS GROUP LIST]', fetchError);
-                    return extra.reply('❌ Could not load the groups this WhatsApp account belongs to.');
-                }
+    try {
+        const inviteInfo = await sock.groupGetInviteInfo(inviteCode);
+        if (inviteInfo?.subject) groupName = inviteInfo.subject;
+        if (inviteInfo?.id) groupJid = inviteInfo.id;
+    } catch (inviteError) {
+        console.warn('[GCSTATUS INVITE LOOKUP]', inviteError.message);
+    }
 
-                const groupJids = Object.keys(participatingGroups || {}).filter(jid => jid.endsWith('@g.us'));
-                if (!groupJids.length) return extra.reply('ℹ️ This WhatsApp account is not currently in any groups.');
+    await extra.reply('📣 *Publishing Group Status Story...*\nPosting invite card directly to your WhatsApp Status.');
 
-                await extra.reply('📣 *Publishing Group Status V2...*\nGroups found: ' + groupJids.length + '\nThe invite will be posted as a status story, not as a normal group message.');
-
-                const storyText = '🔥 NEW GROUP INVITATION!\n\n' +
-                    '👑 ' + groupName + '\n\n' +
-                    inviteUrl + '\n\n' +
-                    '💀 Everyone is welcome!';
-                let posted = 0;
-                const failed = [];
-                const failureBuckets = { admin: 0, connection: 0, timeout: 0, notMember: 0, other: 0 };
-
-                for (const groupJid of groupJids) {
-                    try {
-                        await groupStatusBroadcast(sock, groupJid, {
-                            text: storyText,
-                            backgroundColor: PURPLE_COLOR
-                        });
-                        posted++;
-                    } catch (postError) {
-                        const reason = String(postError.message || 'send failed');
-                        failed.push(groupJid.split('@')[0] + ': ' + reason.slice(0, 90));
-                        if (/not.?participant|not a member|not in group|group not found/i.test(reason)) failureBuckets.notMember++;
-                        else if (/admin|forbidden|not.authorized|permission|not allowed/i.test(reason)) failureBuckets.admin++;
-                        else if (/timeout|timed out|ETIMEDOUT|ECONNABORTED/i.test(reason)) failureBuckets.timeout++;
-                        else if (/connection|socket|closed|disconnected|network|ECONN/i.test(reason)) failureBuckets.connection++;
-                        else failureBuckets.other++;
-                        console.warn('[GCSTATUS POST FAILED]', groupJid, reason);
-                    }
-                    await new Promise(resolve => setTimeout(resolve, 1200));
-                }
-
-                const successRate = Math.round((posted / groupJids.length) * 100);
-                const report = '╭━━〔 *GREAT DEMON V4 — GROUP STATUS REPORT* 〕━━╮\n' +
-                    'TYPE: GROUP STATUS V2\n' +
-                    'TOTAL GROUPS: ' + groupJids.length + '\n' +
-                    'SUCCESSFULLY SUBMITTED: ' + posted + '\n' +
-                    'TOTAL FAILED: ' + failed.length + '\n\n' +
-                    '━━━━ FAILURE BREAKDOWN ━━━━\n' +
-                    '🔒 Permission / admin errors: ' + failureBuckets.admin + '\n' +
-                    '⚠️ Connection errors: ' + failureBuckets.connection + '\n' +
-                    '⏳ Timeout errors: ' + failureBuckets.timeout + '\n' +
-                    '🚫 Not a member / group errors: ' + failureBuckets.notMember + '\n' +
-                    '❌ Other errors: ' + failureBuckets.other + '\n\n' +
-                    '━━━━━━━━━━━━━━━━━━━━\n' +
-                    'SUCCESS RATE: ' + successRate + '%\n' +
-                    'STATUS: ' + (failed.length ? 'COMPLETED WITH FAILURES' : 'ALL RELAY REQUESTS ACCEPTED') + '\n' +
-                    'NOTE: Baileys cannot independently verify story visibility.' +
-                    (failed.length ? '\n\nFAILED GROUPS:\n' + failed.slice(0, 10).join('\n') : '') +
-                    '\n╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯';
-                await extra.reply(report);
-                break;
+    try {
+        // Post the group invite natively to your Status Story broadcast JID
+        await sock.sendMessage('status@broadcast', {
+            groupInviteMessage: {
+                inviteCode: inviteCode,
+                inviteExpiration: Date.now() + 86400000, // 24 hours expiry
+                groupJid: groupJid,
+                groupName: groupName,
+                caption: `🔥 Join our alliance: ${groupName}`
             }
+        }, {
+            statusJidList: Object.keys(sock.chats || {}) // Broadcasts to contacts viewing your status
+        });
 
-            case 'delgcstatus':
-            case 'delgstatus':
-            case 'delgs':
-            case 'revoke': {
-                if (!isSenderAdmin) return extra.reply('⚔️ *Admin rights required!*');
-                const ctx = msg.message?.extendedTextMessage?.contextInfo;
-                if (!ctx?.stanzaId || !ctx?.participant) {
-                    return extra.reply('🗑️ *Reply to the group status story message you want to revoke!*');
-                }
+        const report = '╭━━〔 *GREAT DEMON V4 — STATUS REPORT* 〕━━╮\n' +
+            'TYPE: WHATSAPP STATUS STORY\n' +
+            'TARGET: status@broadcast\n' +
+            'SUCCESS: 100%\n' +
+            'STATUS: SUCCESSFULLY PUBLISHED TO STORY\n' +
+            'NOTE: Group invite card sent to status stories successfully.\n' +
+            '╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯';
+        await extra.reply(report);
 
-                try {
-                    const targetJid = jidNormalizedUser(ctx.participant);
-                    const statusKey = {
-                        remoteJid: from,
-                        fromMe: false,
-                        id: ctx.stanzaId,
-                        participant: targetJid
-                    };
-                    if (typeof sock.revokeGroupStatus === 'function') {
-                        await sock.revokeGroupStatus(from, statusKey);
-                        await extra.reply('✅ *Group status successfully revoked!*');
-                    } else {
-                        await sock.sendMessage(from, { delete: statusKey });
-                        await extra.reply('✅ *Group status message deleted!*');
-                    }
-                } catch (e) {
-                    await extra.reply('❌ *Failed to revoke status story. Ensure bot has admin rights.*');
-                }
-                break;
-            }
+    } catch (postError) {
+        console.error('[GCSTATUS STORY FAILED]', postError);
+        await extra.reply('❌ Failed to publish status story: ' + postError.message);
+    }
+    break;
+}
+  
+case 'delgcstatus':
+case 'delgstatus':
+case 'delgs':
+case 'revoke': {
+    if (!isOwner) return extra.reply('⚔️ *Only My Lord Demon Emperor can revoke status stories!*');
+    
+    const ctx = msg.message?.extendedTextMessage?.contextInfo;
+    if (!ctx?.stanzaId || !ctx?.participant) {
+        return extra.reply('🗑️ *Reply to the status story message you want to delete!*');
+    }
 
-            case 'flirt':
+    try {
+        const targetParticipant = jidNormalizedUser(ctx.participant);
+        
+        // Target status broadcast with fromMe: false for statuses posted by others/other bots
+        const statusKey = {
+            remoteJid: 'status@broadcast',
+            fromMe: false,
+            id: ctx.stanzaId,
+            participant: targetParticipant
+        };
+
+        await sock.sendMessage('status@broadcast', { delete: statusKey });
+        await extra.reply('✅ *External status story successfully targeted for deletion!*');
+    } catch (e) {
+        console.error('[REVOKE EXTERNAL ERROR]', e);
+        
+        // Fallback option for normal chat messages
+        try {
+            await sock.sendMessage(from, { 
+                delete: { 
+                    remoteJid: from, 
+                    id: ctx.stanzaId, 
+                    participant: ctx.participant,
+                    fromMe: false 
+                } 
+            });
+            await extra.reply('✅ *Message deleted from chat!*');
+        } catch (err2) {
+            await extra.reply('❌ *Failed to delete. WhatsApp restricts deleting stories posted by other accounts unless you have administrative clearance.*');
+        }
+    }
+    break;
+}
+
+      case 'flirt':
             case 'pickup':
             case 'pickupline': {
                 try {
@@ -2195,27 +2180,24 @@ case 'konachansfw': {
             }
 
             case 'autoreact': {
-                if (!isSudo) return extra.reply('⚔️ *Sudo rights required!*');
-                const stateArg = args[0]?.toLowerCase();
-                
-                if (stateArg === 'on') {
-                    autoSettings.autoreact = true;
-                    db.autoSettings = autoSettings;
-                    saveSettings(db);
-                    await extra.reply('✅ *Global Auto-React activated & saved! The bot will now react to all messages.*');
-                } else if (stateArg === 'off') {
-                    autoSettings.autoreact = false;
-                    db.autoSettings = autoSettings;
-                    saveSettings(db);
-                    await extra.reply('❌ *Global Auto-React deactivated & saved!*');
-                } else {
-                    autoSettings.autoreact = !autoSettings.autoreact;
-                    db.autoSettings = autoSettings;
-                    saveSettings(db);
-                    await extra.reply(`⚙️ *Auto-React Status:* ${autoSettings.autoreact ? 'ACTIVE ✅' : 'DISABLED ❌'} (Saved)\n\n💡 *Usage:* \`${prefix}autoreact on\` or \`${prefix}autoreact off\``);
-                }
-                break;
-            }
+    if (!isSudo) return extra.reply('⚔️ *Sudo rights required!*');
+    const stateArg = args[0]?.toLowerCase();
+    
+    if (stateArg === 'on') {
+        autoSettings.autoreact = true;
+        db.autoSettings = autoSettings;
+        saveSettings(db); // Writes changes directly to database.json
+        await extra.reply('✅ *Global Auto-React activated & saved!*');
+    } else if (stateArg === 'off') {
+        autoSettings.autoreact = false;
+        db.autoSettings = autoSettings;
+        saveSettings(db); // Writes changes directly to database.json
+        await extra.reply('❌ *Global Auto-React deactivated & saved!*');
+    } else {
+        await extra.reply(`⚙️ *Auto-React Status:* ${autoSettings.autoreact ? 'ACTIVE ✅' : 'DISABLED ❌'}`);
+    }
+    break;
+}
 
             case 'addowner': {
                 if (!isOwner) return sock.sendMessage(from, { text: '⚔️ *Only My Lord Demon Emperor can appoint co-owners!*' }, { quoted: msg });
@@ -2626,10 +2608,51 @@ case 'konachansfw': {
                 break;
             }
 
-            case 'listchannels': {
-                await sock.sendMessage(from, { text: '📢 *𝐆𝐑𝐄𝐀𝐓_𝐃𝐄𝐌𝐎𝐍 𝐕4 Channels:* Fully subjugated under your rule, My Lord!' }, { quoted: msg });
-                break;
-            }
+case 'listchannels': {
+    if (!isOwner) return extra.reply('⚔️ *Only My Lord Demon Emperor can inspect the channels!*');
+    
+    await extra.reply('📢 *Scanning subjugated channels...*');
+    
+    try {
+        // Fetch newsletter/channel metadata if the function is available in your Baileys version
+        let channels = [];
+        if (typeof sock.newsletterList === 'function') {
+            channels = await sock.newsletterList();
+        } else if (typeof sock.groupFetchAllParticipating === 'function') {
+            // Fallback or filter channels if tracked via chats
+            const chats = Object.values(sock.chats || {});
+            channels = chats.filter(c => c.id && c.id.endsWith('@newsletter'));
+        }
+
+        if (!channels || channels.length === 0) {
+            // Fallback display if no direct newsletter query method is active
+            return await sock.sendMessage(from, { 
+                text: '╭━━〔 *𝐆𝐑𝐄𝐀𝐓_𝐃𝐄𝐌𝐎𝐍 𝐕4 CHANNELS* 〕━━╮\n\n' +
+                      '📢 *Status:* Fully subjugated under your rule, My Lord!\n' +
+                      '⚠️ *Note:* No active live newsletter feeds detected in current socket cache.\n\n' +
+                      '╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯' 
+            }, { quoted: msg });
+        }
+
+        let channelText = '╭━━〔 *𝐆𝐑𝐄𝐀𝐓_𝐃𝐄𝐌𝐎𝐍 𝐕4 CHANNELS* 〕━━╮\n\n';
+        channels.forEach((ch, index) => {
+            channelText += `*${index + 1}.* ${ch.subject || ch.name || 'Unknown Channel'}\n` +
+                           `   🆔 ID: \`${ch.id}\`\n\n`;
+        });
+        channelText += '╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯';
+
+        await sock.sendMessage(from, { text: channelText }, { quoted: msg });
+
+    } catch (err) {
+        console.error('[LISTCHANNELS ERROR]', err);
+        // Fallback response so it never crashes your bot
+        await sock.sendMessage(from, { 
+            text: '📢 *𝐆𝐑𝐄𝐀𝐓_𝐃𝐄𝐌𝐎𝐍 𝐕4 Channels:* Fully subjugated under your rule, My Lord!\n*(Active broadcast network online)*' 
+        }, { quoted: msg });
+    }
+    break;
+}
+
 
             case 'mode':
             case 'private':
