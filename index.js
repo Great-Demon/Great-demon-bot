@@ -4429,10 +4429,11 @@ case 'antitagadmin': {
             }
 
 
-   
 case 'stiker':
 case 'sticker':
 case 's': {
+    const chatId = typeof from !== 'undefined' ? from : msg?.key?.remoteJid;
+
     const unwrap = (message) => {
         while (message) {
             if (message.ephemeralMessage?.message) {
@@ -4447,17 +4448,14 @@ case 's': {
                 message = message.viewOnceMessageV2.message;
                 continue;
             }
+            if (message.viewOnceMessageV2Extension?.message) {
+                message = message.viewOnceMessageV2Extension.message;
+                continue;
+            }
             break;
         }
         return message;
     };
-
-    const currentMessage = unwrap(msg.message);
-
-    const quotedContext =
-        currentMessage?.extendedTextMessage?.contextInfo?.quotedMessage ||
-        currentMessage?.imageMessage?.contextInfo?.quotedMessage ||
-        currentMessage?.videoMessage?.contextInfo?.quotedMessage;
 
     const getMedia = (message) => {
         message = unwrap(message);
@@ -4466,20 +4464,38 @@ case 's': {
         if (message.imageMessage) {
             return { data: message.imageMessage, type: 'image' };
         }
-
         if (message.videoMessage) {
             return { data: message.videoMessage, type: 'video' };
         }
-
         return null;
     };
 
+    const currentMessage = unwrap(msg?.message);
+    const quotedFromMsg =
+        currentMessage?.extendedTextMessage?.contextInfo?.quotedMessage ||
+        currentMessage?.imageMessage?.contextInfo?.quotedMessage ||
+        currentMessage?.videoMessage?.contextInfo?.quotedMessage ||
+        null;
+
+    const quotedFromWrapper =
+        (typeof extra !== 'undefined' ? extra?.quoted?.message : null) ||
+        (typeof m !== 'undefined' ? m?.quoted?.message : null) ||
+        null;
+
     const media =
         getMedia(currentMessage) ||
-        getMedia(quotedContext);
+        getMedia(quotedFromMsg) ||
+        getMedia(quotedFromWrapper);
+
+    // React immediately before doing any work
+    try {
+        await sock.sendMessage(chatId, {
+            react: { text: '🎨', key: msg.key }
+        });
+    } catch {}
 
     if (!media) {
-        await sock.sendMessage(from, {
+        await sock.sendMessage(chatId, {
             text: '📌 Reply to an image or video, or send one with .sticker'
         }, { quoted: msg });
         break;
@@ -4489,32 +4505,38 @@ case 's': {
     let tempOut;
 
     try {
-        if (!ffmpegPath) {
-            throw new Error('FFmpeg binary is unavailable.');
-        }
+        const baileys = require('@whiskeysockets/baileys');
+        const downloadFn =
+            typeof downloadContentFromMessage === 'function'
+                ? downloadContentFromMessage
+                : baileys.downloadContentFromMessage;
 
-        await sock.sendMessage(from, {
-            text: '🎨 Creating your sticker...'
-        }, { quoted: msg });
+        const { execFile } = require('child_process');
+        const { promisify } = require('util');
+        const execFileFn =
+            typeof execFileAsync === 'function'
+                ? execFileAsync
+                : promisify(execFile);
 
-        const stream = await downloadContentFromMessage(
-            media.data,
-            media.type
-        );
+        const fs = require('fs');
+        const path = require('path');
+        const os = require('os');
+        const crypto = require('crypto');
 
+        const binPath =
+            (typeof ffmpegPath !== 'undefined' && ffmpegPath) ? ffmpegPath : 'ffmpeg';
+
+        const stream = await downloadFn(media.data, media.type);
         const chunks = [];
-
         for await (const chunk of stream) {
             chunks.push(chunk);
         }
 
         const buffer = Buffer.concat(chunks);
-
         if (!buffer.length) {
             throw new Error('Media download was empty.');
         }
 
-        // Prevent excessively large uploads.
         if (buffer.length > 25 * 1024 * 1024) {
             throw new Error('Media is too large. Maximum size is 25MB.');
         }
@@ -4528,37 +4550,38 @@ case 's': {
 
         fs.writeFileSync(tempIn, buffer);
 
-        const ffmpegArgs = [
-            '-y',
-            '-i', tempIn,
-            '-vf',
-            'scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000'
-        ];
+        // Always output exact 512x512 canvas
+        const scale512 =
+            'scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000';
+
+        const ffmpegArgs = ['-y', '-i', tempIn];
 
         if (media.type === 'video') {
             ffmpegArgs.push(
                 '-t', '6',
-                '-vf',
-                'fps=15,scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000',
+                '-vf', `fps=15,${scale512}`,
                 '-loop', '0',
                 '-vsync', '0'
             );
         } else {
-            ffmpegArgs.push('-frames:v', '1');
+            ffmpegArgs.push(
+                '-vf', scale512,
+                '-frames:v', '1'
+            );
         }
 
         ffmpegArgs.push(
             '-an',
             '-c:v', 'libwebp',
             '-lossless', '0',
-            '-q:v', '55',
+            '-q:v', '60',
             '-compression_level', '6',
             '-pix_fmt', 'yuva420p',
             '-f', 'webp',
             tempOut
         );
 
-        await execFileAsync(ffmpegPath, ffmpegArgs, {
+        await execFileFn(binPath, ffmpegArgs, {
             timeout: 120000,
             maxBuffer: 10 * 1024 * 1024
         });
@@ -4567,23 +4590,48 @@ case 's': {
             throw new Error('Sticker file was not created.');
         }
 
-        const stickerBuffer = fs.readFileSync(tempOut);
-
+        let stickerBuffer = fs.readFileSync(tempOut);
         if (!stickerBuffer.length) {
             throw new Error('Generated sticker is empty.');
         }
 
-        await sock.sendMessage(from, {
+        // Inject WhatsApp sticker pack & author EXIF metadata if node-webpmux is available
+        try {
+            const webp = require('node-webpmux');
+            const img = new webp.Image();
+            await img.load(stickerBuffer);
+
+            const json = {
+                'sticker-pack-id': 'great-demon-v4.9',
+                'sticker-pack-name': '𝙂𝙍𝙀𝘼𝙏 𝘿𝙀𝙈𝙊𝙉 𝙑4.9 𝘽𝙊𝙏 ❤️‍🔥',
+                'sticker-pack-publisher': '𝒔𝒕𝒊𝒄𝒌𝒆𝒓 𝒄𝒐𝒏𝒗𝒆𝒓𝒕 💫',
+                'emojis': ['❤️‍🔥', '💫']
+            };
+
+            const exifAttr = Buffer.from([
+                0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x16, 0x00, 0x00, 0x00
+            ]);
+            const jsonBuff = Buffer.from(JSON.stringify(json), 'utf-8');
+            const exif = Buffer.concat([exifAttr, jsonBuff]);
+            exif.writeUIntLE(jsonBuff.length, 14, 4);
+
+            img.exif = exif;
+            stickerBuffer = await img.save(null);
+        } catch (exifErr) {
+            console.warn('[STICKER EXIF SKIPPED]', exifErr.message);
+        }
+
+        await sock.sendMessage(chatId, {
             sticker: stickerBuffer
         }, { quoted: msg });
 
     } catch (err) {
         console.error('Sticker Error:', err);
-
-        await sock.sendMessage(from, {
-            text: '❌ Sticker conversion failed. Try another image or a shorter video.'
+        await sock.sendMessage(chatId, {
+            text: `❌ Sticker conversion failed: ${err?.message || 'Unknown error'}`
         }, { quoted: msg });
-
     } finally {
         for (const file of [tempIn, tempOut]) {
             try {
@@ -4598,7 +4646,8 @@ case 's': {
 
     break;
 }
-       
+
+
             case 'toimg': {
                 const isSticker = msg.message?.stickerMessage || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.stickerMessage;
                 if (!isSticker) {
