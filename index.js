@@ -3380,70 +3380,52 @@ case 'revoke': {
                 break;
             }
 
-            case 'devices':
-            case 'device': {
-                const commandMessage = unwrapMessage(msg.message) || {};
-                const ctx = 
-                    commandMessage.extendedTextMessage?.contextInfo ||
-                    commandMessage.imageMessage?.contextInfo ||
-                    commandMessage.videoMessage?.contextInfo ||
-                    commandMessage.documentMessage?.contextInfo || {};
+            
+case 'devices':
+case 'device': {
+    const commandMessage = unwrapMessage(msg.message) || {};
+    const ctx =
+        commandMessage.extendedTextMessage?.contextInfo ||
+        commandMessage.imageMessage?.contextInfo ||
+        commandMessage.videoMessage?.contextInfo ||
+        commandMessage.documentMessage?.contextInfo ||
+        commandMessage.stickerMessage?.contextInfo ||
+        {};
 
-                let target = ctx.mentionedJid?.[0] || null;
+    // Get the author of the message being replied to.
+    let target = ctx.participant || null;
 
-                if (!target && ctx.stanzaId && ctx.participant) {
-                    target = ctx.participant;
-                }
+    // In private chats, the quoted sender is the other person.
+    if (!target && !isGroup && ctx.stanzaId) {
+        target = from;
+    }
 
-                if (!target && q) {
-                    const digits = q.replace(/[^0-9]/g, '');
-                    if (digits.length >= 7) target = digits + '@s.whatsapp.net';
-                }
+    if (!target) {
+        return extra.reply(
+            '❌ Reply to someone\\'s message first.\\n\\nUsage: Reply to a message and type .devices'
+        );
+    }
 
-                if (!target) target = sender;
+    const normalizedTarget = jidNormalizedUser(target);
+    const phone = normalizedTarget.split('@')[0].split(':')[0];
 
-                const normalizedTarget = jidNormalizedUser(target);
-                const phone = normalizedTarget.split('@')[0].split(':')[0];
+    const response =
+        `👑 GREAT DEMON V4.9\\n` +
+        `📱 DEVICE INFORMATION\\n\\n` +
+        `👤 User: @${phone}\\n` +
+        `📲 WhatsApp account: Verified from message metadata\\n` +
+        `📱 Operating system: Not exposed by WhatsApp\\n` +
+        `🔍 Exact phone model: Not available\\n\\n` +
+        `⚠️ WhatsApp does not provide this message's sender phone model or OS to this bot.`;
 
-                let linkedDevices = [];
-                try {
-                    if (typeof sock.getUSyncDevices === 'function') {
-                        linkedDevices = await sock.getUSyncDevices([normalizedTarget], true, true) || [];
-                    }
-                } catch (err) {
-                    console.error('[DEVICES LOOKUP]', err.message);
-                }
+    await sock.sendMessage(from, {
+        text: response,
+        mentions: [normalizedTarget]
+    }, { quoted: msg });
 
-                // Detect actual session platform (Android / iOS / Web / Desktop)
-                const parsePlatform = (item) => {
-                    const rawJid = typeof item === 'string' ? item : (item.jid || item.id || item.user || '');
-                    const str = String(rawJid);
-                    if (str.includes(':0') || str.endsWith('@s.whatsapp.net')) return 'Mobile App (Android/iOS)';
-                    if (str.includes(':1') || str.includes('web')) return 'WhatsApp Web';
-                    if (str.includes(':2') || str.includes('desktop')) return 'WhatsApp Desktop';
-                    if (str.includes(':3')) return 'Multi-Device Companion';
-                    return 'Mobile Client';
-                };
+    break;
+}
 
-                const deviceLines = linkedDevices.length
-                    ? linkedDevices.map((item, index) => `${index + 1}. Platform: *${parsePlatform(item)}*`).join('\n')
-                    : '1. Platform: *Mobile Client (Active)*';
-
-                // Clean layout without Admin references (Works anywhere/anytime)
-                const responseText = 
-                    `📱 *WHATSAPP DEVICE REPORT*\n\n` +
-                    `|⚔️ Target: @${phone}\n` +
-                    `|\n` +
-                    `|📲 Status: Active\n\n` +
-                    `*Detected Sessions:*\n${deviceLines}`;
-
-                await sock.sendMessage(from, {
-                    text: responseText,
-                    mentions: [normalizedTarget]
-                }, { quoted: msg });
-                
-                break;
-            }
 
             case 'getpp': {
                 const target = msg.message?.extendedTextMessage?.contextInfo?.participant || (q ? q.replace(/[^0-9]/g, '') + '@s.whatsapp.net' : null) || sender;
@@ -4435,63 +4417,47 @@ case 's': {
     const chatId = typeof from !== 'undefined' ? from : msg?.key?.remoteJid;
 
     const unwrap = (message) => {
-        while (message) {
-            if (message.ephemeralMessage?.message) {
-                message = message.ephemeralMessage.message;
-                continue;
-            }
-            if (message.viewOnceMessage?.message) {
-                message = message.viewOnceMessage.message;
-                continue;
-            }
-            if (message.viewOnceMessageV2?.message) {
-                message = message.viewOnceMessageV2.message;
-                continue;
-            }
-            if (message.viewOnceMessageV2Extension?.message) {
-                message = message.viewOnceMessageV2Extension.message;
-                continue;
-            }
+        let curr = message;
+        while (curr && typeof curr === 'object') {
+            if (curr.ephemeralMessage?.message) { curr = curr.ephemeralMessage.message; continue; }
+            if (curr.viewOnceMessage?.message) { curr = curr.viewOnceMessage.message; continue; }
+            if (curr.viewOnceMessageV2?.message) { curr = curr.viewOnceMessageV2.message; continue; }
+            if (curr.viewOnceMessageV2Extension?.message) { curr = curr.viewOnceMessageV2Extension.message; continue; }
+            if (curr.documentWithCaptionMessage?.message) { curr = curr.documentWithCaptionMessage.message; continue; }
             break;
         }
-        return message;
+        return curr;
     };
 
     const getMedia = (message) => {
-        message = unwrap(message);
-        if (!message) return null;
-
-        if (message.imageMessage) {
-            return { data: message.imageMessage, type: 'image' };
-        }
-        if (message.videoMessage) {
-            return { data: message.videoMessage, type: 'video' };
-        }
+        const mObj = unwrap(message);
+        if (!mObj || typeof mObj !== 'object') return null;
+        if (mObj.imageMessage) return { data: mObj.imageMessage, type: 'image' };
+        if (mObj.videoMessage) return { data: mObj.videoMessage, type: 'video' };
         return null;
     };
 
     const currentMessage = unwrap(msg?.message);
-    const quotedFromMsg =
+    const quotedFromContext =
         currentMessage?.extendedTextMessage?.contextInfo?.quotedMessage ||
         currentMessage?.imageMessage?.contextInfo?.quotedMessage ||
         currentMessage?.videoMessage?.contextInfo?.quotedMessage ||
         null;
 
-    const quotedFromWrapper =
-        (typeof extra !== 'undefined' ? extra?.quoted?.message : null) ||
-        (typeof m !== 'undefined' ? m?.quoted?.message : null) ||
+    const quotedFromObj =
+        (typeof extra !== 'undefined' ? (extra?.quoted?.message || extra?.quoted) : null) ||
+        (typeof m !== 'undefined' ? (m?.quoted?.message || m?.quoted) : null) ||
         null;
 
     const media =
         getMedia(currentMessage) ||
-        getMedia(quotedFromMsg) ||
-        getMedia(quotedFromWrapper);
+        getMedia(quotedFromContext) ||
+        getMedia(quotedFromObj);
 
-    // React immediately before doing any work
     try {
-        await sock.sendMessage(chatId, {
-            react: { text: '🎨', key: msg.key }
-        });
+        if (msg?.key) {
+            await sock.sendMessage(chatId, { react: { text: '🎨', key: msg.key } });
+        }
     } catch {}
 
     if (!media) {
@@ -4505,99 +4471,84 @@ case 's': {
     let tempOut;
 
     try {
-        const baileys = require('@whiskeysockets/baileys');
+        const baileys = await import('@whiskeysockets/baileys');
         const downloadFn =
             typeof downloadContentFromMessage === 'function'
                 ? downloadContentFromMessage
                 : baileys.downloadContentFromMessage;
 
-        const { execFile } = require('child_process');
-        const { promisify } = require('util');
-        const execFileFn =
-            typeof execFileAsync === 'function'
-                ? execFileAsync
-                : promisify(execFile);
-
-        const fs = require('fs');
-        const path = require('path');
-        const os = require('os');
-        const crypto = require('crypto');
-
-        const binPath =
-            (typeof ffmpegPath !== 'undefined' && ffmpegPath) ? ffmpegPath : 'ffmpeg';
+        const fs = await import('fs');
+        const path = await import('path');
+        const os = await import('os');
+        const crypto = await import('crypto');
 
         const stream = await downloadFn(media.data, media.type);
         const chunks = [];
         for await (const chunk of stream) {
             chunks.push(chunk);
         }
-
         const buffer = Buffer.concat(chunks);
+
         if (!buffer.length) {
-            throw new Error('Media download was empty.');
+            throw new Error('Downloaded media buffer is empty.');
         }
 
-        if (buffer.length > 25 * 1024 * 1024) {
-            throw new Error('Media is too large. Maximum size is 25MB.');
-        }
+        let stickerBuffer;
 
-        const id = crypto.randomUUID();
-        tempIn = path.join(
-            os.tmpdir(),
-            `gd_sticker_${id}.${media.type === 'image' ? 'img' : 'mp4'}`
-        );
-        tempOut = path.join(os.tmpdir(), `gd_sticker_${id}.webp`);
+        if (media.type === 'image') {
+            const sharpMod = await import('sharp');
+            const sharp = sharpMod.default || sharpMod;
 
-        fs.writeFileSync(tempIn, buffer);
-
-        // Always output exact 512x512 canvas
-        const scale512 =
-            'scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000';
-
-        const ffmpegArgs = ['-y', '-i', tempIn];
-
-        if (media.type === 'video') {
-            ffmpegArgs.push(
-                '-t', '6',
-                '-vf', `fps=15,${scale512}`,
-                '-loop', '0',
-                '-vsync', '0'
-            );
+            stickerBuffer = await sharp(buffer)
+                .resize(512, 512, {
+                    fit: 'contain',
+                    background: { r: 0, g: 0, b: 0, alpha: 0 }
+                })
+                .webp({ quality: 75 })
+                .toBuffer();
         } else {
-            ffmpegArgs.push(
-                '-vf', scale512,
-                '-frames:v', '1'
-            );
+            const { execFile } = await import('child_process');
+            const { promisify } = await import('util');
+            const execFileFn = promisify(execFile);
+
+            let binPath = 'ffmpeg';
+            try {
+                const ffStatic = await import('ffmpeg-static');
+                if (ffStatic.default) binPath = ffStatic.default;
+            } catch {}
+
+            const id = crypto.randomUUID();
+            tempIn = path.join(os.tmpdir(), `gd_in_${id}.mp4`);
+            tempOut = path.join(os.tmpdir(), `gd_out_${id}.webp`);
+            fs.writeFileSync(tempIn, buffer);
+
+            const vf =
+                'fps=15,scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000';
+
+            await execFileFn(binPath, [
+                '-y',
+                '-i', tempIn,
+                '-t', '6',
+                '-vf', vf,
+                '-loop', '0',
+                '-vsync', '0',
+                '-an',
+                '-c:v', 'libwebp',
+                '-lossless', '0',
+                '-q:v', '55',
+                '-compression_level', '6',
+                '-pix_fmt', 'yuva420p',
+                '-f', 'webp',
+                tempOut
+            ], { timeout: 120000 });
+
+            stickerBuffer = fs.readFileSync(tempOut);
         }
 
-        ffmpegArgs.push(
-            '-an',
-            '-c:v', 'libwebp',
-            '-lossless', '0',
-            '-q:v', '60',
-            '-compression_level', '6',
-            '-pix_fmt', 'yuva420p',
-            '-f', 'webp',
-            tempOut
-        );
-
-        await execFileFn(binPath, ffmpegArgs, {
-            timeout: 120000,
-            maxBuffer: 10 * 1024 * 1024
-        });
-
-        if (!fs.existsSync(tempOut)) {
-            throw new Error('Sticker file was not created.');
-        }
-
-        let stickerBuffer = fs.readFileSync(tempOut);
-        if (!stickerBuffer.length) {
-            throw new Error('Generated sticker is empty.');
-        }
-
-        // Inject WhatsApp sticker pack & author EXIF metadata if node-webpmux is available
+        // Inject pack name & author EXIF via node-webpmux if installed
         try {
-            const webp = require('node-webpmux');
+            const webpMod = await import('node-webpmux');
+            const webp = webpMod.default || webpMod;
             const img = new webp.Image();
             await img.load(stickerBuffer);
 
@@ -4620,7 +4571,7 @@ case 's': {
             img.exif = exif;
             stickerBuffer = await img.save(null);
         } catch (exifErr) {
-            console.warn('[STICKER EXIF SKIPPED]', exifErr.message);
+            console.warn('[STICKER EXIF]', exifErr?.message || exifErr);
         }
 
         await sock.sendMessage(chatId, {
@@ -4628,25 +4579,22 @@ case 's': {
         }, { quoted: msg });
 
     } catch (err) {
-        console.error('Sticker Error:', err);
-        await sock.sendMessage(chatId, {
-            text: `❌ Sticker conversion failed: ${err?.message || 'Unknown error'}`
-        }, { quoted: msg });
+        console.error('[STICKER ERROR]', err);
+        try {
+            await sock.sendMessage(chatId, {
+                text: `❌ Sticker failed: ${err?.message || String(err)}`
+            }, { quoted: msg });
+        } catch {}
     } finally {
-        for (const file of [tempIn, tempOut]) {
+        for (const f of [tempIn, tempOut]) {
             try {
-                if (file && fs.existsSync(file)) {
-                    fs.unlinkSync(file);
-                }
-            } catch (cleanupError) {
-                console.error('Sticker cleanup error:', cleanupError);
-            }
+                if (f && fs.existsSync(f)) fs.unlinkSync(f);
+            } catch {}
         }
     }
 
     break;
 }
-
 
             case 'toimg': {
                 const isSticker = msg.message?.stickerMessage || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.stickerMessage;
