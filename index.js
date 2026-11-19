@@ -5345,14 +5345,14 @@ async function startTelegramManager() {
         return true;
     }
     
-const TELEGRAM_WELCOME_IMAGE = "https://img.sanishtech.com/u/58210e1bf8b93988aa95289701c31b48.png";
+const TELEGRAM_WELCOME_IMAGE = "https://i.postimg.cc/W16FQ3Cm/b995a10a149bc1a50e49bfa93cf8358117f8692a7bb8edf57321640f23f8211f.png";
 const bannerUrl = TELEGRAM_WELCOME_IMAGE;
 
     const menuCaption =
         '╭━━〔 👑 *𝑮𝑹𝑬𝑨𝑻 𝑫𝑬𝑴𝑶𝑵 V4* 〕━━╮\n' +
         '┃ *𝑬𝑴𝑷𝑬𝑹𝑶𝑹 𝑷𝑨𝑵𝑬𝑳*\n' +
         '┣━━━━━━━━━━━━━━━━━━━━\n' +
-        '┃ 𝑽4.4  •  𝑪𝑶𝑵𝑻𝑹𝑶𝑳 𝑪𝑬𝑵𝑻𝑹𝑬\n' +
+        '┃ 𝑽4.9  •  𝑪𝑶𝑵𝑻𝑹𝑶𝑳 𝑪𝑬𝑵𝑻𝑹𝑬\n' +
         '┃ Manage your linked WhatsApp\n' +
         '┃ account and bot tools below.\n' +
         '╰━━━━━━━━━━━━━━━━━━━━\n\n' +
