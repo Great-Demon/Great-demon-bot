@@ -3381,50 +3381,93 @@ case 'revoke': {
             }
 
             
+
 case 'devices':
 case 'device': {
-    const commandMessage = unwrapMessage(msg.message) || {};
-    const ctx =
-        commandMessage.extendedTextMessage?.contextInfo ||
-        commandMessage.imageMessage?.contextInfo ||
-        commandMessage.videoMessage?.contextInfo ||
-        commandMessage.documentMessage?.contextInfo ||
-        commandMessage.stickerMessage?.contextInfo ||
-        {};
+    try {
+        // Unwrap WhatsApp message wrappers
+        let message = msg.message || {};
 
-    // Get the author of the message being replied to.
-    let target = ctx.participant || null;
+        while (
+            message.ephemeralMessage ||
+            message.viewOnceMessage ||
+            message.viewOnceMessageV2 ||
+            message.documentWithCaptionMessage
+        ) {
+            message =
+                message.ephemeralMessage?.message ||
+                message.viewOnceMessage?.message ||
+                message.viewOnceMessageV2?.message ||
+                message.documentWithCaptionMessage?.message ||
+                message;
+        }
 
-    // In private chats, the quoted sender is the other person.
-    if (!target && !isGroup && ctx.stanzaId) {
-        target = from;
+        // Get quoted message context
+        const context =
+            message.extendedTextMessage?.contextInfo ||
+            message.imageMessage?.contextInfo ||
+            message.videoMessage?.contextInfo ||
+            message.documentMessage?.contextInfo ||
+            message.stickerMessage?.contextInfo ||
+            message.audioMessage?.contextInfo ||
+            {};
+
+        if (!context.stanzaId) {
+            await sock.sendMessage(from, {
+                text:
+                    "❌ Reply to the person's message first.\n\n" +
+                    "Usage: Reply to a message and type .devices"
+            }, { quoted: msg });
+
+            break;
+        }
+
+        // Identify the author of the quoted message
+        let target = context.participant;
+
+        // In a private chat, the quoted sender is the other person
+        if (!target && !from.endsWith('@g.us')) {
+            target = from;
+        }
+
+        if (!target) {
+            await sock.sendMessage(from, {
+                text: "❌ Could not identify the sender of that message."
+            }, { quoted: msg });
+
+            break;
+        }
+
+        const phone = target
+            .split('@')[0]
+            .split(':')[0];
+
+        const report =
+            "👑 GREAT DEMON V4.9\n" +
+            "📱 DEVICE INFORMATION\n\n" +
+            "👤 User: @" + phone + "\n" +
+            "📲 Account: WhatsApp\n" +
+            "📱 Operating system: Not exposed\n" +
+            "📟 Exact device model: Not available\n\n" +
+            "🔍 Detection: Quoted message metadata\n\n" +
+            "⚠️ WhatsApp does not expose the sender's exact phone model or operating system through ordinary message metadata.";
+
+        await sock.sendMessage(from, {
+            text: report,
+            mentions: [target]
+        }, { quoted: msg });
+
+    } catch (error) {
+        console.error("DEVICES COMMAND ERROR:", error);
+
+        await sock.sendMessage(from, {
+            text: "❌ Device information could not be retrieved."
+        }, { quoted: msg });
     }
-
-    if (!target) {
-        return extra.reply(
-            '❌ Reply to someone\\'s message first.\\n\\nUsage: Reply to a message and type .devices'
-        );
-    }
-
-    const normalizedTarget = jidNormalizedUser(target);
-    const phone = normalizedTarget.split('@')[0].split(':')[0];
-
-    const response =
-        `👑 GREAT DEMON V4.9\\n` +
-        `📱 DEVICE INFORMATION\\n\\n` +
-        `👤 User: @${phone}\\n` +
-        `📲 WhatsApp account: Verified from message metadata\\n` +
-        `📱 Operating system: Not exposed by WhatsApp\\n` +
-        `🔍 Exact phone model: Not available\\n\\n` +
-        `⚠️ WhatsApp does not provide this message's sender phone model or OS to this bot.`;
-
-    await sock.sendMessage(from, {
-        text: response,
-        mentions: [normalizedTarget]
-    }, { quoted: msg });
 
     break;
 }
+
 
 
             case 'getpp': {
