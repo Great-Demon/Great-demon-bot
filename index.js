@@ -3450,7 +3450,7 @@ case 'device': {
             "📱 Operating system: Not exposed\n" +
             "📟 Exact device model: Not available\n\n" +
             "🔍 Detection: Quoted message metadata\n\n" +
-            "⚠️ WhatsApp does not expose the sender's exact phone model or operating system through ordinary message metadata.";
+            "⚠️ sorry it failed whatsapp unableto expose.";
 
         await sock.sendMessage(from, {
             text: report,
@@ -4457,56 +4457,93 @@ case 'antitagadmin': {
 case 'stiker':
 case 'sticker':
 case 's': {
-    const chatId = typeof from !== 'undefined' ? from : msg?.key?.remoteJid;
+    const unwrapMessage = (input) => {
+        let current = input;
 
-    const unwrap = (message) => {
-        let curr = message;
-        while (curr && typeof curr === 'object') {
-            if (curr.ephemeralMessage?.message) { curr = curr.ephemeralMessage.message; continue; }
-            if (curr.viewOnceMessage?.message) { curr = curr.viewOnceMessage.message; continue; }
-            if (curr.viewOnceMessageV2?.message) { curr = curr.viewOnceMessageV2.message; continue; }
-            if (curr.viewOnceMessageV2Extension?.message) { curr = curr.viewOnceMessageV2Extension.message; continue; }
-            if (curr.documentWithCaptionMessage?.message) { curr = curr.documentWithCaptionMessage.message; continue; }
-            break;
+        for (let i = 0; i < 10 && current; i++) {
+            const next =
+                current.ephemeralMessage?.message ||
+                current.viewOnceMessage?.message ||
+                current.viewOnceMessageV2?.message ||
+                current.viewOnceMessageV2Extension?.message ||
+                current.documentWithCaptionMessage?.message ||
+                current.editedMessage?.message ||
+                current.deviceSentMessage?.message;
+
+            if (!next) break;
+            current = next;
         }
-        return curr;
+
+        return current;
     };
 
-    const getMedia = (message) => {
-        const mObj = unwrap(message);
-        if (!mObj || typeof mObj !== 'object') return null;
-        if (mObj.imageMessage) return { data: mObj.imageMessage, type: 'image' };
-        if (mObj.videoMessage) return { data: mObj.videoMessage, type: 'video' };
+    const findMedia = (input, depth = 0) => {
+        if (!input || typeof input !== 'object' || depth > 12) {
+            return null;
+        }
+
+        const node = unwrapMessage(input);
+        if (!node || typeof node !== 'object') return null;
+
+        if (node.imageMessage) {
+            return { data: node.imageMessage, type: 'image' };
+        }
+
+        if (node.videoMessage) {
+            return { data: node.videoMessage, type: 'video' };
+        }
+
+        for (const [key, value] of Object.entries(node)) {
+            if (
+                key === 'contextInfo' ||
+                key === 'messageContextInfo' ||
+                key === 'senderKeyDistributionMessage'
+            ) continue;
+
+            const result = findMedia(value, depth + 1);
+            if (result) return result;
+        }
+
         return null;
     };
 
-    const currentMessage = unwrap(msg?.message);
-    const quotedFromContext =
-        currentMessage?.extendedTextMessage?.contextInfo?.quotedMessage ||
-        currentMessage?.imageMessage?.contextInfo?.quotedMessage ||
-        currentMessage?.videoMessage?.contextInfo?.quotedMessage ||
-        null;
+    let media = findMedia(msg.message);
 
-    const quotedFromObj =
-        (typeof extra !== 'undefined' ? (extra?.quoted?.message || extra?.quoted) : null) ||
-        (typeof m !== 'undefined' ? (m?.quoted?.message || m?.quoted) : null) ||
-        null;
+    // Find quoted media
+    if (!media) {
+        const quotedMessages = [];
 
-    const media =
-        getMedia(currentMessage) ||
-        getMedia(quotedFromContext) ||
-        getMedia(quotedFromObj);
+        const findQuoted = (input, depth = 0) => {
+            if (!input || typeof input !== 'object' || depth > 12) return;
 
-    try {
-        if (msg?.key) {
-            await sock.sendMessage(chatId, { react: { text: '🎨', key: msg.key } });
+            const node = unwrapMessage(input);
+            if (!node || typeof node !== 'object') return;
+
+            for (const value of Object.values(node)) {
+                if (!value || typeof value !== 'object') continue;
+
+                if (value.contextInfo?.quotedMessage) {
+                    quotedMessages.push(value.contextInfo.quotedMessage);
+                }
+
+                findQuoted(value, depth + 1);
+            }
+        };
+
+        findQuoted(msg.message);
+
+        for (const quoted of quotedMessages) {
+            media = findMedia(quoted);
+            if (media) break;
         }
-    } catch {}
+    }
 
     if (!media) {
-        await sock.sendMessage(chatId, {
-            text: '📌 Reply to an image or video, or send one with .sticker'
+        await sock.sendMessage(from, {
+            text:
+                '📌 Reply to an image or video, or send an image/video with .sticker as its caption.'
         }, { quoted: msg });
+
         break;
     }
 
@@ -4514,130 +4551,125 @@ case 's': {
     let tempOut;
 
     try {
-        const baileys = await import('@whiskeysockets/baileys');
-        const downloadFn =
-            typeof downloadContentFromMessage === 'function'
-                ? downloadContentFromMessage
-                : baileys.downloadContentFromMessage;
+        const id = crypto.randomUUID();
 
-        const fs = await import('fs');
-        const path = await import('path');
-        const os = await import('os');
-        const crypto = await import('crypto');
+        tempIn = path.join(
+            os.tmpdir(),
+            `great_demon_${id}.${media.type === 'image' ? 'img' : 'mp4'}`
+        );
 
-        const stream = await downloadFn(media.data, media.type);
+        tempOut = path.join(
+            os.tmpdir(),
+            `great_demon_${id}.webp`
+        );
+
+        // Download media
+        const stream = await downloadContentFromMessage(
+            media.data,
+            media.type
+        );
+
         const chunks = [];
+
         for await (const chunk of stream) {
             chunks.push(chunk);
         }
+
         const buffer = Buffer.concat(chunks);
 
         if (!buffer.length) {
-            throw new Error('Downloaded media buffer is empty.');
+            throw new Error('Media download was empty.');
         }
 
-        let stickerBuffer;
+        if (buffer.length > 25 * 1024 * 1024) {
+            throw new Error('Media exceeds the 25MB limit.');
+        }
 
-        if (media.type === 'image') {
-            const sharpMod = await import('sharp');
-            const sharp = sharpMod.default || sharpMod;
+        fs.writeFileSync(tempIn, buffer);
 
-            stickerBuffer = await sharp(buffer)
-                .resize(512, 512, {
-                    fit: 'contain',
-                    background: { r: 0, g: 0, b: 0, alpha: 0 }
-                })
-                .webp({ quality: 75 })
-                .toBuffer();
-        } else {
-            const { execFile } = await import('child_process');
-            const { promisify } = await import('util');
-            const execFileFn = promisify(execFile);
+        // Fit all images into a normal 512x512 sticker canvas
+        // Preserve proportions and avoid cropping or stretching.
+        const fitFilter =
+            'scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,' +
+            'pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000';
 
-            let binPath = 'ffmpeg';
-            try {
-                const ffStatic = await import('ffmpeg-static');
-                if (ffStatic.default) binPath = ffStatic.default;
-            } catch {}
+        const ffmpegArgs = ['-y', '-i', tempIn];
 
-            const id = crypto.randomUUID();
-            tempIn = path.join(os.tmpdir(), `gd_in_${id}.mp4`);
-            tempOut = path.join(os.tmpdir(), `gd_out_${id}.webp`);
-            fs.writeFileSync(tempIn, buffer);
-
-            const vf =
-                'fps=15,scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000';
-
-            await execFileFn(binPath, [
-                '-y',
-                '-i', tempIn,
+        if (media.type === 'video') {
+            ffmpegArgs.push(
                 '-t', '6',
-                '-vf', vf,
+                '-vf', `fps=15,${fitFilter}`,
                 '-loop', '0',
-                '-vsync', '0',
-                '-an',
-                '-c:v', 'libwebp',
-                '-lossless', '0',
-                '-q:v', '55',
-                '-compression_level', '6',
-                '-pix_fmt', 'yuva420p',
-                '-f', 'webp',
-                tempOut
-            ], { timeout: 120000 });
-
-            stickerBuffer = fs.readFileSync(tempOut);
+                '-vsync', '0'
+            );
+        } else {
+            ffmpegArgs.push(
+                '-vf', fitFilter,
+                '-frames:v', '1'
+            );
         }
 
-        // Inject pack name & author EXIF via node-webpmux if installed
-        try {
-            const webpMod = await import('node-webpmux');
-            const webp = webpMod.default || webpMod;
-            const img = new webp.Image();
-            await img.load(stickerBuffer);
+        ffmpegArgs.push(
+            '-an',
+            '-c:v', 'libwebp',
+            '-lossless', '0',
+            '-q:v', '55',
+            '-compression_level', '6',
+            '-pix_fmt', 'yuva420p',
+            '-f', 'webp',
+            tempOut
+        );
 
-            const json = {
-                'sticker-pack-id': 'great-demon-v4.9',
-                'sticker-pack-name': '𝙂𝙍𝙀𝘼𝙏 𝘿𝙀𝙈𝙊𝙉 𝙑4.9 𝘽𝙊𝙏 ❤️‍🔥',
-                'sticker-pack-publisher': '𝒔𝒕𝒊𝒄𝒌𝒆𝒓 𝒄𝒐𝒏𝒗𝒆𝒓𝒕 💫',
-                'emojis': ['❤️‍🔥', '💫']
-            };
+        await execFileAsync(
+            ffmpegPath,
+            ffmpegArgs,
+            {
+                timeout: 120000,
+                maxBuffer: 10 * 1024 * 1024
+            }
+        );
 
-            const exifAttr = Buffer.from([
-                0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,
-                0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x16, 0x00, 0x00, 0x00
-            ]);
-            const jsonBuff = Buffer.from(JSON.stringify(json), 'utf-8');
-            const exif = Buffer.concat([exifAttr, jsonBuff]);
-            exif.writeUIntLE(jsonBuff.length, 14, 4);
-
-            img.exif = exif;
-            stickerBuffer = await img.save(null);
-        } catch (exifErr) {
-            console.warn('[STICKER EXIF]', exifErr?.message || exifErr);
+        if (!fs.existsSync(tempOut)) {
+            throw new Error('Sticker file was not created.');
         }
 
-        await sock.sendMessage(chatId, {
-            sticker: stickerBuffer
+        const stickerBuffer = fs.readFileSync(tempOut);
+
+        if (!stickerBuffer.length) {
+            throw new Error('Generated sticker is empty.');
+        }
+
+        // Send sticker with GREAT DEMON branding
+        await sock.sendMessage(from, {
+            sticker: stickerBuffer,
+            packname: '𝙂𝙍𝙀𝘼𝙏 𝘿𝙀𝙈𝙊𝙉 𝙑4.9 𝘽𝙊𝙏 ❤️‍🔥',
+            author: '𝒔𝒕𝒊𝒄𝒌𝒆𝒓 𝒄𝒐𝒏𝒗𝒆𝒓𝒕 💫'
         }, { quoted: msg });
 
     } catch (err) {
-        console.error('[STICKER ERROR]', err);
-        try {
-            await sock.sendMessage(chatId, {
-                text: `❌ Sticker failed: ${err?.message || String(err)}`
-            }, { quoted: msg });
-        } catch {}
+        console.error('[GREAT DEMON STICKER ERROR]', err);
+
+        await sock.sendMessage(from, {
+            text: '❌ Sticker conversion failed: ' +
+                String(err?.message || err).slice(0, 250)
+        }, { quoted: msg });
+
     } finally {
-        for (const f of [tempIn, tempOut]) {
+        for (const file of [tempIn, tempOut]) {
             try {
-                if (f && fs.existsSync(f)) fs.unlinkSync(f);
-            } catch {}
+                if (file && fs.existsSync(file)) {
+                    fs.unlinkSync(file);
+                }
+            } catch (e) {
+                console.error('[STICKER CLEANUP]', e.message);
+            }
         }
     }
 
     break;
 }
+
+
 
             case 'toimg': {
                 const isSticker = msg.message?.stickerMessage || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.stickerMessage;
