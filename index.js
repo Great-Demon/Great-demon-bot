@@ -5342,96 +5342,110 @@ async function startTelegramManager() {
         }
     }
 
-    // Optional public, direct MP4 URL configured in the hosting environment.
-    // Telegram fetches the video from this URL when the join prompt is sent.
-    const TELEGRAM_JOIN_VIDEO_URL = String(process.env.TELEGRAM_JOIN_VIDEO_URL || '').trim();
+    function escapeTelegramHtml(value) {
+        return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
 
     async function sendJoinPrompt(chatId, userId) {
         const configured = configuredRequiredChannels;
-        const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({
-            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-        })[ch]);
+        const videoUrl = String(process.env.TELEGRAM_JOIN_VIDEO_URL || '').trim();
+        const intro = '<b>⚠️ Join all required channels before using this bot.</b>';
         const inline_keyboard = [];
-        const rows = [];
+        const tableRows = [];
 
+        // Resolve each title independently from membership. A failed member
+        // lookup must never discard a title that getChat already returned.
         for (let i = 0; i < configured.length; i++) {
             const channel = configured[i];
-            let displayName = channel.name || '';
-            let chatType = channel.type || 'channel';
+            let displayName = String(channel.name || '').trim();
+            let chatType = String(channel.type || 'channel').toLowerCase();
             let status = '🔴 Pending';
 
             try {
-                const [chat, member] = await Promise.all([
-                    telegram.getChat(channel.id),
-                    userId ? telegram.getChatMember(channel.id, userId) : Promise.resolve(null)
-                ]);
-                displayName = chat.title || chat.username || displayName;
-                chatType = chat.type || chatType;
-                if (member && (['creator', 'administrator', 'member'].includes(member.status) ||
-                    (member.status === 'restricted' && member.is_member === true))) {
-                    status = '🟢 Joined';
-                }
+                const chat = await telegram.getChat(channel.id);
+                displayName = String(chat.title || chat.username || displayName || '').trim();
+                chatType = String(chat.type || chatType).toLowerCase();
             } catch (err) {
-                console.warn('[FORCE JOIN CHAT INFO]', channel.id, err.message);
-                status = '🟠 Check after join';
+                console.warn('[FORCE JOIN CHAT TITLE]', channel.id, err.message);
             }
 
-            const kind = ['group', 'supergroup'].includes(chatType) ? 'GROUP' : 'CHANNEL';
-            const name = String(displayName || (kind === 'GROUP' ? 'Required group' : 'Required channel'))
-                .replace(/[\r\n]/g, ' ').slice(0, 64);
-            rows.push('<b>' + (i + 1) + '. ' + escapeHtml(name) + '</b>  —  ' + status);
-            inline_keyboard.push([{ text: '📢  ' + name.slice(0, 45) + '  ↗', style: 'danger', url: channel.link }]);
+            try {
+                if (userId) {
+                    const member = await telegram.getChatMember(channel.id, userId);
+                    const joined = ['creator', 'administrator', 'member'].includes(member.status) ||
+                        (member.status === 'restricted' && member.is_member === true);
+                    status = joined ? '🟢 Joined' : '🔴 Pending';
+                } else {
+                    status = '🟠 Check after join';
+                }
+            } catch (err) {
+                console.warn('[FORCE JOIN MEMBER STATUS]', channel.id, err.message);
+                status = '🟠 Check access';
+            }
+
+            const kind = ['group', 'supergroup'].includes(chatType) ? 'group' : 'channel';
+            if (!displayName) displayName = kind === 'group' ? 'Required group' : 'Required channel';
+            displayName = displayName.replace(/[\r\n]/g, ' ').slice(0, 70);
+            tableRows.push({ number: i + 1, name: displayName, status });
+
+            // Telegram's current Bot API supports danger/success button styles.
+            inline_keyboard.push([{
+                text: `📣  JOIN ${displayName}`.slice(0, 64),
+                url: channel.link,
+                style: 'danger'
+            }]);
         }
 
-        const caption = '⚠️ <b>Join all required channels before using this bot.</b>';
-        const tableText = [
-            '📢 <b>Required Channels</b>                         <b>🔵 Status</b>',
-            '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-            ...(rows.length ? rows : ['No required channels are configured yet.']),
-            '',
-            '🔔 Join every listed group/channel, then verify your membership below.'
-        ].join('\n');
-
-        inline_keyboard.push([{ text: '☑  I HAVE JOINED ALL', style: 'success', callback_data: 'gd_check_join' }]);
-        const replyMarkup = { inline_keyboard };
-
-        // Send the video first when configured. Telegram clients control autoplay;
-        // supports_streaming allows compatible MP4s to begin playing before download completes.
-        if (TELEGRAM_JOIN_VIDEO_URL) {
+        const caption = intro;
+        let mediaSent = false;
+        if (videoUrl) {
             try {
-                await telegram.sendVideo(chatId, TELEGRAM_JOIN_VIDEO_URL, {
+                await telegram.sendVideo(chatId, videoUrl, {
                     caption,
                     parse_mode: 'HTML',
                     supports_streaming: true
                 });
+                mediaSent = true;
             } catch (err) {
                 console.warn('[FORCE JOIN VIDEO]', err.message);
-                try {
-                    await telegram.sendPhoto(chatId, TELEGRAM_WELCOME_IMAGE, {
-                        caption,
-                        parse_mode: 'HTML'
-                    });
-                } catch (photoErr) {
-                    console.warn('[FORCE JOIN FALLBACK IMAGE]', photoErr.message);
-                    await telegram.sendMessage(chatId, caption, { parse_mode: 'HTML' });
-                }
             }
-        } else {
+        }
+
+        if (!mediaSent) {
             try {
-                await telegram.sendPhoto(chatId, TELEGRAM_WELCOME_IMAGE, {
+                await telegram.sendPhoto(chatId, bannerUrl, {
                     caption,
                     parse_mode: 'HTML'
                 });
+                mediaSent = true;
             } catch (err) {
-                console.warn('[FORCE JOIN IMAGE]', err.message);
-                await telegram.sendMessage(chatId, caption, { parse_mode: 'HTML' });
+                console.warn('[FORCE JOIN BANNER]', err.message);
             }
         }
+
+        if (!mediaSent) {
+            await telegram.sendMessage(chatId, caption, { parse_mode: 'HTML' });
+        }
+
+        const alignedRows = tableRows.length
+            ? tableRows.map(row => `${row.number}. ${row.name.slice(0, 23).padEnd(23)} ${row.status}`).join('\n')
+            : 'No required communities are configured.';
+        const tableText = [
+            '<b>📢 Required Channels</b>                 <b>🔵 Status</b>',
+            '<pre>────────────────────────────────────────\n' + escapeTelegramHtml(alignedRows) + '\n────────────────────────────────────────</pre>',
+            '🔹 Join every listed community, then verify your membership below.'
+        ].join('\n');
+
+        inline_keyboard.push([{
+            text: '☑  I HAVE JOINED ALL',
+            callback_data: 'gd_check_join',
+            style: 'success'
+        }]);
 
         await telegram.sendMessage(chatId, tableText, {
             parse_mode: 'HTML',
             disable_web_page_preview: true,
-            reply_markup: replyMarkup
+            reply_markup: { inline_keyboard }
         });
     }
 
