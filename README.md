@@ -1,692 +1,153 @@
-GREAT DEMON V4.9
 
+<div align="center">
 
-WhatsApp Automation • Group Management • Anime Collection • Telegram Integration
+# 🔥 GREAT DEMON V4.9
 
+### The Ultimate WhatsApp Anime & Entertainment Bot
 
-GREAT DEMON is a multi-purpose WhatsApp automation project built with JavaScript and Baileys. It brings together group management, media utilities, an interactive anime collection system, a player economy and optional Telegram integration.
+[![JavaScript](https://img.shields.io/badge/JavaScript-ES2022-yellow?style=for-the-badge&logo=javascript)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
+[![Node.js](https://img.shields.io/badge/Node.js-22+-green?style=for-the-badge&logo=node.js)](https://nodejs.org/)
+[![WhatsApp](https://img.shields.io/badge/WhatsApp-Bot-25D366?style=for-the-badge&logo=whatsapp)](https://whatsapp.com/)
+[![Telegram](https://img.shields.io/badge/Telegram-Integration-26A5E4?style=for-the-badge&logo=telegram)](https://telegram.org/)
+[![Render](https://img.shields.io/badge/Deploy-Render-46E3B7?style=for-the-badge&logo=render)](https://render.com/)
 
+**Developed by Kelvin**
 
-Overview
+</div>
 
+---
 
-GREAT DEMON includes:
+## 📖 About
 
+GREAT DEMON V4.9 is a WhatsApp automation bot built with JavaScript and Baileys. It combines entertainment, anime character collections, group management, and interactive features in one project.
 
+## ✨ Features
 
+- 🎴 Anime character collection and card shop
+- 💰 Economy and wallet system
+- 🔄 Player-to-player card trading
+- 🎨 Anime artwork support
+- 👥 Group management tools
+- 🛡️ Anti-link and anti-spam protection
+- 📸 WhatsApp Group Status features
+- 🤖 Telegram management integration
+- 🎵 Media and entertainment commands
 
-Group administration and moderation
+## 🧰 Requirements
 
+- Node.js 22 or newer
+- Git
+- A WhatsApp account
+- Telegram bot token (optional)
 
-Anti-link and group protection features
+## 🚀 Installation
 
-
-Anime character collection and card purchasing
-
-
-Player-to-player card trading
-
-
-Wallet and bank economy
-
-
-Player profiles and leaderboards
-
-
-WhatsApp Group Status V2
-
-
-Media processing and utility commands
-
-
-Telegram control panel and WhatsApp account linking
-
-
-
-
-Requirements
-
-
-
-
-Node.js 22 or newer
-
-
-npm
-
-
-Git
-
-
-WhatsApp account
-
-
-Telegram account (for Telegram integration)
-
-
-Render account (for cloud deployment)
-
-
-
-
-Installation
-
-
-Clone the repository:
-
-
+```bash
 git clone YOUR_REPOSITORY_URL
-
-
-
-Enter the project directory:
-
-
-cd GREAT-DEMON-V4
-
-
-
-Install dependencies:
-
-
+cd YOUR_REPOSITORY
 npm install
-
-
-
-Start the bot:
-
-
 npm start
+```
 
+Follow the WhatsApp pairing instructions shown in the terminal.
 
+## ☁️ Deploy on Render
 
-Complete the WhatsApp authentication process when prompted.
+1. Push your project to GitHub.
+2. Sign in to [Render](https://render.com/).
+3. Create a new **Web Service**.
+4. Connect your GitHub repository.
+5. Select the Node.js environment.
+6. Set the build command:
 
-
-Deployment on Render
-
-
-GREAT DEMON can be deployed as a Node.js Web Service on Render.
-
-
-Step 1 — Upload to GitHub
-
-
-Upload the project files to a GitHub repository. Ensure the repository includes:
-
-
-
-
-index.js
-
-
-package.json
-
-
-package-lock.json
-
-
-
-
-Step 2 — Create a Render Web Service
-
-
-
-
-Visit https://render.com/
-
-
-Sign in and select New → Web Service.
-
-
-Connect your GitHub account.
-
-
-Select your GREAT DEMON repository.
-
-
-Configure the service:
-
-
-
-
-
-
-Setting
-Value
-
-
-
-
-Runtime
-Node
-
-
-Build Command
+```bash
 npm install
+```
 
+7. Set the start command:
 
-Start Command
+```bash
 npm start
+```
 
+8. Add the required environment variables.
+9. Deploy your service.
 
+### Environment variables
 
+| Variable | Purpose |
+|---|---|
+| `PORT` | Render web service port |
+| `DATA_DIR` | Persistent data directory |
+| `OWNER_NUMBER` | Bot owner's WhatsApp number |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token |
+| `TELEGRAM_OWNER_ID` | Telegram owner's numeric ID |
 
-Deploy the service and check the logs for errors.
+For persistent storage, attach a Render disk and configure:
 
+```env
+DATA_DIR=/var/data
+```
 
-Step 3 — Configure Persistent Storage
+## 🤖 Telegram Setup
 
+1. Open Telegram.
+2. Search for [@BotFather](https://t.me/BotFather).
+3. Send `/newbot`.
+4. Follow the instructions to create your bot.
+5. Copy the token provided by BotFather.
+6. Add it to Render as `TELEGRAM_BOT_TOKEN`.
 
-Persistent storage is important for keeping WhatsApp sessions, economy data, card collections and settings across deployments.
+### Get your Telegram ID
 
+1. Open your Telegram bot.
+2. Send `/myid`.
+3. Copy the numeric ID returned.
+4. Add it to Render as `TELEGRAM_OWNER_ID`.
 
+## 🎮 Anime Card Economy
 
+GREAT DEMON includes an anime card collection system with:
 
-Open your Render service.
+- Card spawning and collection
+- Tier-based card prices
+- Card shop
+- Player-to-player trading
+- Trade confirmation and cancellation
 
+## 🛠️ Troubleshooting
 
-Add a Persistent Disk.
+**Bot refuses to start**
+- Check your Node.js version.
+- Run `npm install` again.
+- Check your Render logs.
 
+**Session disappears after restart**
+- Configure persistent storage.
+- Set `DATA_DIR` to the mounted disk path.
 
-Set the mount path to /var/data.
+**Telegram integration is not responding**
+- Check your bot token.
+- Confirm the Telegram owner ID.
+- Check Render environment variables.
 
+## 🔐 Security
 
-Open the Environment settings.
+- Keep your WhatsApp session private.
+- Never publish your Telegram bot token.
+- Do not share private environment variables.
+- Use trusted deployment platforms.
 
+## 👨‍💻 Developer
 
-Add:
+**Kelvin**
 
+Project: GREAT DEMON V4.9
 
+---
 
+<div align="center">
 
+**GREAT DEMON V4.9 — Built for the anime community.**
 
-
-Key
-Value
-
-
-
-
-DATA_DIR
-/var/data
-
-
-
-
-Save the configuration.
-
-
-Without a persistent disk, locally stored bot data may be lost after a restart or redeployment.
-
-
-Telegram Setup
-
-
-Telegram integration provides access to the GREAT DEMON control panel and WhatsApp account linking.
-
-
-Step 1 — Create a Telegram Bot
-
-
-
-
-Open Telegram.
-
-
-Search for @BotFather.
-
-
-Send /newbot.
-
-
-Follow the instructions.
-
-
-Copy the API token provided by BotFather.
-
-
-
-
-Keep the token private.
-
-
-Step 2 — Get Your Telegram ID
-
-
-
-
-Open your GREAT DEMON Telegram bot.
-
-
-Send /start.
-
-
-Send /myid.
-
-
-Your numeric Telegram ID will be displayed.
-
-
-
-
-Your Telegram ID is different from your Telegram username.
-
-
-Step 3 — Connect Telegram to Render
-
-
-Open your Render service and navigate to Environment.
-
-
-Add these variables:
-
-
-
-
-Variable
-Description
-
-
-
-
-TELEGRAM_BOT_TOKEN
-Token received from BotFather
-
-
-TELEGRAM_OWNER_ID
-Your numeric Telegram ID
-
-
-
-
-Save the changes and restart or redeploy the service.
-
-
-Telegram Commands
-
-
-
-
-Command
-Description
-
-
-
-
-/start
-Open the control panel
-
-
-/connect
-Link a WhatsApp account
-
-
-/listdevices
-View linked sessions
-
-
-/delpair
-Unlink a WhatsApp session
-
-
-/addid
-Enable personal security and bug reports
-
-
-/myid
-Display Telegram ID and report status
-
-
-/removeid
-Disable personal security and bug reports
-
-
-/status
-Check connection status
-
-
-
-
-Telegram integration is optional. Without TELEGRAM_BOT_TOKEN, the WhatsApp bot can start without the Telegram manager.
-
-
-WhatsApp Owner Configuration
-
-
-The WhatsApp owner number is configured in index.js.
-
-
-Find the OWNER_NUMBER setting and ensure it contains the correct number in international format, without the leading +.
-
-
-Example:
-
-
-const OWNER_NUMBER = "234XXXXXXXXXX";
-
-
-
-The WhatsApp owner number and Telegram owner ID are separate settings.
-
-
-Anime Collection System
-
-
-GREAT DEMON includes an interactive anime character collection system.
-
-
-Players can collect characters, purchase available cards and build their own collections.
-
-
-
-
-Command
-Description
-
-
-
-
-.spawncard
-Spawn and purchase a random card
-
-
-.cardshop
-Browse available cards
-
-
-.cardbuy <ID>
-Purchase a listed card
-
-
-.mycards
-View your collection
-
-
-
-
-Card Trading
-
-
-Players can make card sale offers or propose exchanges.
-
-
-
-
-Command
-Description
-
-
-
-
-.cardoffer @user <cardID> <price>
-Offer a card for sale
-
-
-.cardtrade @user <yourCardID> <theirCardID> [extraGD]
-Propose a card exchange
-
-
-.cardaccept <tradeID>
-Accept a trade
-
-
-.cardconfirm <tradeID>
-Confirm the exchange
-
-
-.tradecancel <tradeID>
-Cancel a pending trade
-
-
-
-
-Pending trades expire after 30 minutes.
-
-
-Card Ranks and Prices
-
-
-
-
-Rank
-Price
-
-
-
-
-S
-100,000 GD
-
-
-A
-50,000 GD
-
-
-B
-20,000 GD
-
-
-C
-10,000 GD
-
-
-D
-5,000 GD
-
-
-E
-2,000 GD
-
-
-
-
-Economy System
-
-
-The economy includes player wallets, bank accounts, profiles and rankings.
-
-
-
-
-Command
-Description
-
-
-
-
-.profile
-View your profile
-
-
-.profile @user
-View another player's profile
-
-
-.balance
-Check your wallet
-
-
-.bank
-Check your bank
-
-
-.deposit <amount>
-Deposit money
-
-
-.withdraw <amount>
-Withdraw money
-
-
-.richest
-View the richest player
-
-
-.leaderboard
-View economy rankings
-
-
-
-
-Group Management
-
-
-GREAT DEMON provides group administration and protection tools.
-
-
-Available features include moderation, anti-link protection, automated group safeguards and administrator controls.
-
-
-Some commands require group administrator or bot owner permissions.
-
-
-WhatsApp Status
-
-
-The project includes Group Status V2 functionality for sharing supported content through WhatsApp Status.
-
-
-Availability depends on the installed Baileys version and the supported status implementation.
-
-
-Configuration and Data
-
-
-The bot stores persistent information such as:
-
-
-
-
-WhatsApp authentication sessions
-
-
-Economy accounts
-
-
-Anime card collections
-
-
-Group settings
-
-
-Bot settings
-
-
-Message statistics
-
-
-
-
-Back up your persistent data before replacing or updating the project.
-
-
-Troubleshooting
-
-
-Bot does not start
-
-
-Check the Render logs, Node.js version and dependency installation.
-
-
-Telegram bot does not respond
-
-
-Check TELEGRAM_BOT_TOKEN and ensure the Telegram bot token is valid.
-
-
-Security alerts are not received
-
-
-Check TELEGRAM_OWNER_ID and make sure you have started a conversation with your Telegram bot.
-
-
-Data disappears after deployment
-
-
-Check that the Render Persistent Disk is mounted at /var/data and that DATA_DIR is set to /var/data.
-
-
-WhatsApp disconnects
-
-
-Check the authentication session and reconnect the account if necessary.
-
-
-Security
-
-
-
-
-Never publish WhatsApp session credentials.
-
-
-Never expose your Telegram bot token.
-
-
-Keep owner configuration private.
-
-
-Back up persistent data regularly.
-
-
-Only use trusted sources for project updates.
-
-
-
-
-Disclaimer
-
-
-GREAT DEMON is an independent software project. It is not affiliated with, endorsed by or officially associated with WhatsApp, Meta or Telegram.
-
-
-Users are responsible for how they configure and operate the software and must comply with the applicable platform terms.
-
-
-
-Project Information
-
-
-
-
-Property
-Details
-
-
-
-
-Project
-GREAT DEMON
-
-
-Version
-4.9.0
-
-
-Language
-JavaScript
-
-
-Runtime
-Node.js
-
-
-WhatsApp Library
-Baileys
-
-
-Hosting Support
-Render
-
-
-Telegram Integration
-Optional
-
-
-
-
-GREAT DEMON V4.9 — Project Documentation
-
-
+</div>
