@@ -1,8 +1,9 @@
+
 {
   "name": "great-demon-v4",
-  "version": "4.9.0",
+  "version": "4.4.0",
   "private": true,
-  "description": "GREAT DEMON V4.9 with paid anime cards, player card trading and Group Status V2",
+  "description": "GREAT DEMON V4 with Baileys v7, Group Status invitation cards and Emperor Panel",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
