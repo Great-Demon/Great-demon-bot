@@ -3380,105 +3380,182 @@ case 'konachansfw': {
             }
 
             
+
 case 'gcstatus':
 case 'ggstatus':
 case 'gcast': {
     if (!isOwner) {
         return extra.reply('⚔️ Only the Demon Emperor can publish Group Status V2!');
     }
+
     if (!GROUP_STATUS_V2_SUPPORTED) {
         return extra.reply(GROUP_STATUS_V2_UNAVAILABLE);
     }
 
     const inviteUrl = String(q || '').trim();
-    const match = inviteUrl.match(/(?:https?:\/\/)?chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/i);
-    if (!match) return extra.reply('❌ Usage:\n.ggstatus https://chat.whatsapp.com/INVITECODE');
-    if (!sock.user?.id) return extra.reply('❌ WhatsApp is not connected.');
+    const match = inviteUrl.match(
+        /(?:https?:\/\/)?chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/i
+    );
+
+    if (!match) {
+        return extra.reply(
+            '❌ Usage:\n.ggstatus https://chat.whatsapp.com/INVITECODE'
+        );
+    }
+
+    if (!sock.user?.id) {
+        return extra.reply('❌ WhatsApp is not connected.');
+    }
 
     try {
         const inviteInfo = await sock.groupGetInviteInfo(match[1]);
-        const invitedGroupJid = String(inviteInfo?.id || inviteInfo?.jid || '');
+
         console.log('[GGSTATUS] Invite metadata resolved:', {
-            id: invitedGroupJid || null,
+            id: inviteInfo?.id || inviteInfo?.jid || null,
             subject: inviteInfo?.subject || null,
-            hasPictureUrl: Boolean(inviteInfo?.profilePicUrl || inviteInfo?.profilePictureUrl || inviteInfo?.pictureUrl)
+            hasPictureUrl: Boolean(
+                inviteInfo?.profilePicUrl ||
+                inviteInfo?.profilePictureUrl ||
+                inviteInfo?.pictureUrl
+            )
         });
-        if (!invitedGroupJid.endsWith('@g.us')) {
-            return extra.reply('❌ WhatsApp returned incomplete invitation metadata. No status was published.');
+
+        if (
+            !(inviteInfo?.id || inviteInfo?.jid) ||
+            !String(inviteInfo.id || inviteInfo.jid).endsWith('@g.us')
+        ) {
+            return extra.reply(
+                '❌ WhatsApp returned incomplete invitation metadata.'
+            );
         }
 
         const groupName = inviteInfo?.subject || 'WhatsApp Group';
+
         const groups = await sock.groupFetchAllParticipating();
-        const groupJids = Object.keys(groups || {}).filter(jid => jid.endsWith('@g.us'));
-        if (!groupJids.length) return extra.reply('❌ No participating groups found.');
+        const groupJids = Object.keys(groups || {})
+            .filter(jid => jid.endsWith('@g.us'));
 
-        await extra.reply(
-            `📡 Preparing Group Status V2 image...\n` +
-            `🏰 Groups found: ${groupJids.length}\n` +
-            `🖼️ Generating invitation card.`
-        );
-
-        // Publish the requested invitation image only. Do not send a separate
-        // text-only status first, which was producing the purple link-only story.
-        let invitationCard;
-        try {
-            invitationCard = await createGroupInvitationCard(sock, groupName, inviteUrl, inviteInfo);
-            if (!Buffer.isBuffer(invitationCard) || invitationCard.length < 10000) {
-                throw new Error('Generated invitation card is empty or invalid.');
-            }
-        } catch (error) {
-            console.error('[GROUP INVITATION CARD GENERATION FAILED]', error?.stack || error);
-            return extra.reply(`❌ Invitation card generation failed. No text-only fallback was posted.\nReason: ${error?.message || 'Unknown error'}`);
+        if (!groupJids.length) {
+            return extra.reply('❌ No participating groups found.');
         }
 
-        let cardsAccepted = 0;
+        await extra.reply(
+            `📡 Preparing Group Status V2...\n` +
+            `🏰 Groups found: ${groupJids.length}\n` +
+            `📌 Publishing invitation as status stories.`
+        );
+
+        const story = {
+            text: `${groupName}\n${inviteUrl}`,
+            backgroundColor: PURPLE_COLOR
+        };
+
+        let submitted = 0;
+        let cardsSubmitted = 0;
+        const failed = [];
         const cardFailed = [];
+        let invitationCard = null;
+        let cardGenerationError = null;
+
+        try {
+            invitationCard = await createGroupInvitationCard(
+                sock,
+                groupName,
+                inviteUrl,
+                inviteInfo
+            );
+        } catch (error) {
+            cardGenerationError = error;
+            console.error(
+                '[GROUP INVITATION CARD GENERATION FAILED]',
+                error?.stack || error
+            );
+
+            await extra.reply(
+                `⚠️ Invitation image generation failed.\n` +
+                `Reason: ${error?.message || 'Unknown card-generation error'}`
+            );
+        }
+
         for (const groupJid of groupJids) {
             try {
-                const result = await groupStatusBroadcast(sock, groupJid, {
-                    image: invitationCard,
-                    mimetype: 'image/jpeg',
-                    caption: `${groupName}\n${inviteUrl}`
-                });
-                if (!result?.accepted || !result?.messageId || result.mediaType !== 'image') {
-                    throw new Error('Image status relay did not return an accepted image message.');
-                }
-                cardsAccepted++;
-                console.log('[GGSTATUS IMAGE RELAY ACCEPTED]', {
-                    groupJid, messageId: result.messageId, bytes: invitationCard.length
-                });
+                await groupStatusBroadcast(sock, groupJid, story);
+                submitted++;
             } catch (error) {
-                console.error('[GGSTATUS IMAGE RELAY FAILED]', groupJid, error?.stack || error);
-                cardFailed.push(`${groupJid}: ${error?.message || 'Image relay failed'}`);
+                console.error('[GROUP STATUS V2 FAILED]', groupJid, error);
+                failed.push(
+                    `${groupJid}: ${error.message || 'Unknown error'}`
+                );
             }
+
+            if (!invitationCard) {
+                cardFailed.push(
+                    `${groupJid}: ${cardGenerationError?.message || 'Card generation failed'}`
+                );
+            } else {
+                try {
+                    await groupStatusBroadcast(sock, groupJid, {
+                        image: invitationCard,
+                        caption: `${groupName}\n${inviteUrl}`
+                    });
+
+                    cardsSubmitted++;
+                    console.log(
+                        '[GROUP INVITATION CARD RELAY ACCEPTED]',
+                        groupJid
+                    );
+                } catch (cardError) {
+                    console.error(
+                        '[GROUP INVITATION CARD RELAY FAILED]',
+                        groupJid,
+                        cardError
+                    );
+
+                    cardFailed.push(
+                        `${groupJid}: ${cardError.message || 'Card relay failed'}`
+                    );
+                }
+            }
+
             await new Promise(resolve => setTimeout(resolve, 1200));
         }
 
         await extra.reply(
             `╭━━━〔 👑 GREAT DEMON V4 〕━━━╮\n` +
-            `┃ 📡 GROUP STATUS V2 IMAGE REPORT\n` +
+            `┃ 📡 GROUP STATUS V2 REPORT\n` +
             `┣━━━━━━━━━━━━━━━━━━━━\n` +
-            `┃ 🖼️ Image relays accepted: ${cardsAccepted}/${groupJids.length}\n` +
-            `┃ ❌ Image relays failed: ${cardFailed.length}\n` +
-            `┃ 🧩 Card generation: READY\n` +
-            `┃ 🔗 Content: Group invitation card\n` +
+            `┃ 📤 Text relays accepted: ${submitted}/${groupJids.length}\n` +
+            `┃ 🖼️ Photo-card relays accepted: ${cardsSubmitted}/${groupJids.length}\n` +
+            `┃ ❌ Text failed: ${failed.length}\n` +
+            `┃ ⚠️ Card failed: ${cardFailed.length}\n` +
+            (cardGenerationError
+                ? `┃ 🧩 Card generation: FAILED\n`
+                : `┃ 🧩 Card generation: READY\n`) +
+            `┃ 🔗 Content: Group invitation\n` +
             `┃ 📍 Destination: Participating groups\n` +
             `╰━━━━━━━━━━━━━━━━━━━━╯\n\n` +
-            (cardFailed.length
-                ? `Failed destinations:\n${cardFailed.slice(0, 8).join('\n')}`
-                : 'WhatsApp accepted the image relay requests. This does not guarantee display in every group; check the Status tab.')
+            (
+                (failed.length || cardFailed.length)
+                    ? `Text failures:\n${failed.slice(0, 5).join('\n') || 'None'}\n\n` +
+                      `Card generation error:\n${cardGenerationError?.message || 'None'}\n\n` +
+                      `Card failures:\n${cardFailed.slice(0, 5).join('\n') || 'None'}`
+                    : 'Relay requests were accepted by the connection; check the Status tab.'
+            )
         );
+
     } catch (error) {
-        console.error('[GGSTATUS ERROR]', error?.stack || error);
-        await extra.reply(`❌ GROUP STATUS V2 FAILED\n\n${error?.message || 'Unknown error'}`);
+        console.error('[GGSTATUS ERROR]', error);
+
+        await extra.reply(
+            `❌ GROUP STATUS V2 FAILED\n\n${error.message}`
+        );
     }
+
     break;
 }
 
-  
+
 case 'delgcstatus':
-case 'delgstatus':
-case 'delgs':
 case 'revoke': {
     if (!isOwner) return extra.reply('⚔️ *Only My Lord Demon Emperor can revoke status stories!*');
     
@@ -3521,7 +3598,7 @@ case 'revoke': {
     break;
 }
 
-                  case 'flirt':
+            case 'flirt':
             case 'pickup':
             case 'pickupline': {
                 try {
@@ -4408,110 +4485,195 @@ case 'antitagadmin': {
                 }
                 break;
             }
-            case 'kick':
-            case 'remove':
-            case 'dor': {
-                if (!isGroup) return sock.sendMessage(from, { text: '⚔️ *Domain command only!*' }, { quoted: msg });
-                
-                // Allow the primary owner or an actual WhatsApp group administrator. Sudo alone is not enough.
-                if (!isSenderAdmin) {
-                    return sock.sendMessage(from, { text: '⚔️ *Actual group admin rights required!*' }, { quoted: msg });
-                }
+case 'kick':
+case 'remove':
+case 'dor': {
+    if (!isGroup) {
+        return sock.sendMessage(from, {
+            text: '⚔️ *Domain command only!*'
+        }, { quoted: msg });
+    }
 
-                // Read the quoted target from Baileys' native message fields,
-                // using the same direct-property approach as the working media commands.
-                const activeKickMessage = unwrapMessage(msg.message) || msg.message || {};
-                const contextInfo = getMessageContextInfos(activeKickMessage)
-                    .find(ctx => ctx && (ctx.quotedMessage || ctx.mentionedJid?.length || ctx.participant || ctx.stanzaId)) || {};
-                const quotedMessage = unwrapMessage(contextInfo.quotedMessage) || {};
-                const mentioned = Array.isArray(contextInfo.mentionedJid)
-                    ? contextInfo.mentionedJid : [];
-                let target = mentioned[0] || contextInfo.participant || null;
+    if (!isSenderAdmin) {
+        return sock.sendMessage(from, {
+            text: '⚔️ *Actual group admin rights required!*'
+        }, { quoted: msg });
+    }
 
-                // If participant is absent, recover the original sender from the
-                // existing message cache. Media type does not change target lookup.
-                if (!target && contextInfo.stanzaId) {
-                    const originalQuotedMessage = messageCache.get(contextInfo.stanzaId);
-                    target = originalQuotedMessage?.key?.participant ||
-                        (originalQuotedMessage?.key?.remoteJid?.endsWith('@g.us') ? null : originalQuotedMessage?.key?.remoteJid) || null;
-                }
+    const activeKickMessage = unwrapMessage(msg.message) || msg.message || {};
 
-                if (!target && q) {
-                    const cleanNum = q.replace(/[^0-9]/g, '');
-                    if (cleanNum.length >= 7) target = cleanNum + '@s.whatsapp.net';
-                }
+    const contextInfo = getMessageContextInfos(activeKickMessage)
+        .find(ctx => ctx && (
+            ctx.quotedMessage ||
+            ctx.mentionedJid?.length ||
+            ctx.participant ||
+            ctx.stanzaId
+        )) || {};
 
-                if (!target) {
-                    return sock.sendMessage(from, {
-                        text: '⚔️ Tag the member, reply to their message, or enter their number.'
-                    }, { quoted: msg });
-                }
+    const mentioned = Array.isArray(contextInfo.mentionedJid)
+        ? contextInfo.mentionedJid
+        : [];
 
-                const normalizeKickJid = jid => jid ? jidNormalizedUser(jid) : '';
-                let targetJid = normalizeKickJid(target);
-                const adminJid = normalizeKickJid(sender);
+    let target = mentioned[0] || contextInfo.participant || null;
 
-                const toPhoneJid = async jid => {
-                    if (!jid) return '';
-                    if (jid.endsWith('@s.whatsapp.net')) return jid;
-                    if (jid.endsWith('@lid')) {
-                        try {
-                            const mapped = await sock.signalRepository?.lidMapping?.getPNForLID?.(jid);
-                            if (mapped) return normalizeKickJid(mapped);
-                        } catch (err) {}
-                    }
-                    return '';
-                };
+    if (!target && contextInfo.stanzaId && typeof messageCache !== 'undefined') {
+        const originalQuotedMessage = messageCache.get(contextInfo.stanzaId);
 
-                try {
-                    const before = await sock.groupMetadata(from);
-                    const targetParticipant = before.participants.find(p =>
-                        normalizeKickJid(p.id) === targetJid ||
-                        normalizeKickJid(p.phoneNumber) === targetJid
-                    );
-                    if (targetParticipant?.id) {
-                        targetJid = normalizeKickJid(targetParticipant.id);
-                    } else if (!targetParticipant) {
-                        const mapped = await toPhoneJid(targetJid);
-                        if (mapped) targetJid = mapped;
-                    }
+        target =
+            originalQuotedMessage?.key?.participant ||
+            (
+                originalQuotedMessage?.key?.remoteJid?.endsWith('@g.us')
+                    ? null
+                    : originalQuotedMessage?.key?.remoteJid
+            ) ||
+            null;
+    }
 
-                    const targetInGroup = before.participants.some(p =>
-                        normalizeKickJid(p.id) === targetJid ||
-                        normalizeKickJid(p.phoneNumber) === targetJid
-                    );
-                    if (!targetInGroup) {
-                        return sock.sendMessage(from, { text: '❌ That member is not in this group.' }, { quoted: msg });
-                    }
-                    if (await isProtectedOwnerJid(sock, targetJid) || await isProtectedOwnerJid(sock, targetParticipant?.phoneNumber)) {
-                        return extra.reply('🛡️ The bot owner is protected and cannot be removed by this command.');
-                    }
+    const rawArg = typeof q === 'string' && q.trim()
+        ? q.trim()
+        : (Array.isArray(args) ? args.join(' ').trim() : '');
 
-                    const result = await sock.groupParticipantsUpdate(from, [targetJid], 'remove');
-                    const failed = Array.isArray(result) && result.some(item =>
-                        item?.status && !['200', 200].includes(item.status)
-                    );
-                    if (failed) throw new Error('WhatsApp rejected the removal request');
+    if (!target && rawArg) {
+        const cleanNum = rawArg.replace(/[^0-9]/g, '');
+        if (cleanNum.length >= 7) {
+            target = cleanNum + '@s.whatsapp.net';
+        }
+    }
 
-                    // Styled with your requested design layout
-                    const responseText = 
-                        `|⚔️ User: @${targetJid.split('@')[0]}\n` +
-                        `|\n` +
-                        `|👤 Requested by: @${adminJid.split('@')[0]}`;
+    if (!target) {
+        return sock.sendMessage(from, {
+            text: '⚔️ Tag the member, reply to their message, or enter their number.'
+        }, { quoted: msg });
+    }
 
-                    await sock.sendMessage(from, { 
-                        text: responseText,
-                        mentions: [adminJid, targetJid]
-                    }, { quoted: msg });
+    const normalizeKickJid = jid =>
+        jid ? jidNormalizedUser(jid) : '';
 
-                } catch (err) {
-                    console.error('[KICK COMMAND]', err);
-                    await sock.sendMessage(from, {
-                        text: '❌ *Kick failed.* Ensure the bot account is a group admin and the target is not an admin.'
-                    }, { quoted: msg });
-                }
-                break;
+    const digitsOnly = jid =>
+        String(jid || '').split('@')[0].replace(/[^0-9]/g, '');
+
+    let targetJid = normalizeKickJid(target);
+    const adminJid = normalizeKickJid(sender);
+
+    const toPhoneJid = async jid => {
+        if (!jid) return '';
+        if (jid.endsWith('@s.whatsapp.net')) return normalizeKickJid(jid);
+
+        if (jid.endsWith('@lid')) {
+            try {
+                const mapped = await sock.signalRepository?.lidMapping?.getPNForLID?.(jid);
+                if (mapped) return normalizeKickJid(mapped);
+            } catch (err) {
+                console.error('[KICK LID MAPPING]', err);
             }
+        }
+        return '';
+    };
+
+    try {
+        const metadata = await sock.groupMetadata(from);
+        const participants = Array.isArray(metadata?.participants) ? metadata.participants : [];
+
+        const targetDigits = digitsOnly(targetJid);
+
+        let targetParticipant = participants.find(p => {
+            const pId = normalizeKickJid(p?.id);
+            const pLid = normalizeKickJid(p?.lid);
+            const pPhone = normalizeKickJid(p?.phoneNumber);
+
+            return (
+                (targetJid && (pId === targetJid || pLid === targetJid || pPhone === targetJid)) ||
+                (targetDigits && (
+                    digitsOnly(pId) === targetDigits ||
+                    digitsOnly(pLid) === targetDigits ||
+                    digitsOnly(pPhone) === targetDigits
+                ))
+            );
+        });
+
+        if (!targetParticipant && targetJid.endsWith('@lid')) {
+            const mappedPhone = await toPhoneJid(targetJid);
+            if (mappedPhone) {
+                const mappedDigits = digitsOnly(mappedPhone);
+                targetParticipant = participants.find(p =>
+                    normalizeKickJid(p?.id) === mappedPhone ||
+                    normalizeKickJid(p?.phoneNumber) === mappedPhone ||
+                    (mappedDigits && digitsOnly(p?.id) === mappedDigits)
+                );
+                if (!targetParticipant) {
+                    targetJid = mappedPhone;
+                }
+            }
+        }
+
+        if (targetParticipant?.id) {
+            targetJid = normalizeKickJid(targetParticipant.id);
+        }
+
+        const stillInGroup = Boolean(targetParticipant) || participants.some(p =>
+            normalizeKickJid(p?.id) === targetJid ||
+            normalizeKickJid(p?.lid) === targetJid ||
+            normalizeKickJid(p?.phoneNumber) === targetJid
+        );
+
+        if (!stillInGroup) {
+            return sock.sendMessage(from, {
+                text: '❌ That member is not in this group.'
+            }, { quoted: msg });
+        }
+
+        if (
+            (typeof isProtectedOwnerJid === 'function' && (
+                await isProtectedOwnerJid(sock, targetJid) ||
+                await isProtectedOwnerJid(sock, targetParticipant?.id) ||
+                await isProtectedOwnerJid(sock, targetParticipant?.lid) ||
+                await isProtectedOwnerJid(sock, targetParticipant?.phoneNumber)
+            ))
+        ) {
+            return extra.reply(
+                '🛡️ The bot owner is protected and cannot be removed by this command.'
+            );
+        }
+
+        const result = await sock.groupParticipantsUpdate(
+            from,
+            [targetJid],
+            'remove'
+        );
+
+        const failed = Array.isArray(result) && result.some(item => {
+            const status = item?.status;
+            return status !== undefined && status !== null && !['200', 200].includes(status);
+        });
+
+        if (failed) {
+            throw new Error(`WhatsApp rejected removal: ${JSON.stringify(result)}`);
+        }
+
+        const displayTargetNum = digitsOnly(targetParticipant?.phoneNumber || targetJid) || targetJid.split('@')[0];
+        const displayAdminNum = digitsOnly(adminJid) || adminJid.split('@')[0];
+
+        const responseText =
+            `|⚔️ User: @${displayTargetNum}\n` +
+            `|\n` +
+            `|👤 Requested by: @${displayAdminNum}`;
+
+        await sock.sendMessage(from, {
+            text: responseText,
+            mentions: [adminJid, targetJid, targetParticipant?.id, targetParticipant?.phoneNumber].filter(Boolean)
+        }, { quoted: msg });
+
+    } catch (err) {
+        console.error('[KICK COMMAND]', err?.stack || err);
+
+        await sock.sendMessage(from, {
+            text: '❌ *Kick failed.* Ensure the bot account is a group admin and the target is not an admin.'
+        }, { quoted: msg });
+    }
+
+    break;
+}
+
 
             case 'add':
             case 'addmember': {
@@ -4967,156 +5129,183 @@ case 'antitagadmin': {
             }
 
 
-   
-// Embed WhatsApp-compatible sticker pack metadata in the WebP EXIF chunk.
-// This labels the sticker pack in WhatsApp's sticker details; it does not
-// paint branding over the sticker artwork.
-function addStickerPackMetadata(webpBuffer) {
-    if (!Buffer.isBuffer(webpBuffer) || webpBuffer.toString('ascii', 0, 4) !== 'RIFF' ||
-        webpBuffer.toString('ascii', 8, 12) !== 'WEBP') {
-        throw new Error('Generated sticker is not a valid WebP file.');
-    }
-    const pack = {
-        'sticker-pack-id': 'great-demon-v49-stickers',
-        'sticker-pack-name': '𝙂𝙍𝙀𝘼𝙏 𝘿𝙀𝙈𝙊𝙉 𝙑4.9 𝘽𝙊𝙏 ❤️‍🔥',
-        'sticker-pack-publisher': '𝒔𝒕𝒊𝒄𝒌𝒆𝒓 𝒄𝒐𝒏𝒗𝒆𝒓𝒕 💫',
-        emojis: ['💫']
-    };
-    const json = Buffer.from(JSON.stringify(pack), 'utf8');
-    const tiffHeader = Buffer.from([
-        0x49,0x49,0x2A,0x00,0x08,0x00,0x00,0x00,
-        0x01,0x00,0x41,0x57,0x07,0x00,0x00,0x00,
-        0x00,0x00,0x16,0x00,0x00,0x00
-    ]);
-    const exif = Buffer.concat([tiffHeader, json]);
-    const chunkHeader = Buffer.alloc(8);
-    chunkHeader.write('EXIF', 0, 4, 'ascii');
-    chunkHeader.writeUInt32LE(exif.length, 4);
-    const padding = exif.length % 2 ? Buffer.from([0]) : Buffer.alloc(0);
-
-    const chunks = [];
-    let offset = 12;
-    while (offset + 8 <= webpBuffer.length) {
-        const size = webpBuffer.readUInt32LE(offset + 4);
-        const end = offset + 8 + size + (size % 2);
-        if (end > webpBuffer.length) throw new Error('Generated WebP contains an invalid chunk.');
-        // Replace any old EXIF chunk so repeated processing stays valid.
-        if (webpBuffer.toString('ascii', offset, offset + 4) !== 'EXIF') {
-            chunks.push(webpBuffer.subarray(offset, end));
-        }
-        offset = end;
-    }
-    if (offset !== webpBuffer.length) throw new Error('Generated WebP has trailing invalid data.');
-
-    // EXIF must follow the image data. Keep the RIFF/WEBP header, then all
-    // original chunks, then the new EXIF chunk.
-    const body = Buffer.concat([...chunks, chunkHeader, exif, padding]);
-    const header = Buffer.from(webpBuffer.subarray(0, 12));
-    header.writeUInt32LE(body.length + 4, 4);
-    const result = Buffer.concat([header, body]);
-
-    // Advertise EXIF metadata in the VP8X feature flags when present.
-    let pos = 12;
-    while (pos + 8 <= result.length) {
-        const name = result.toString('ascii', pos, pos + 4);
-        const size = result.readUInt32LE(pos + 4);
-        if (name === 'VP8X' && size >= 10) result[pos + 8] |= 0x08;
-        pos += 8 + size + (size % 2);
-    }
-    return result;
-}
-
+                
 case 'stiker':
 case 'sticker':
 case 's': {
-    // Directly follow the supplied sticker command's target-message flow.
-    const chatId = from;
-    let targetMessage = msg;
-    const ctxInfo = msg.message?.extendedTextMessage?.contextInfo;
-    if (ctxInfo?.quotedMessage) {
-        targetMessage = {
-            key: {
-                remoteJid: chatId,
-                id: ctxInfo.stanzaId,
-                participant: ctxInfo.participant,
-            },
-            message: ctxInfo.quotedMessage,
-        };
-    }
-
-    const mediaMessage =
-        targetMessage.message?.imageMessage ||
-        targetMessage.message?.videoMessage ||
-        targetMessage.message?.documentMessage;
-
-    if (!mediaMessage) {
-        return extra.reply('📎 Reply to an *image* / *video* with .sticker or send media with .sticker as caption.');
-    }
-
-    const MAX_FILE_SIZE = 50 * 1024 * 1024;
-    const timestamp = Date.now();
-    const tempInput = path.join(os.tmpdir(), `in_${timestamp}`);
-    const tempOutput = path.join(os.tmpdir(), `out_${timestamp}.webp`);
-    const tempFiles = [tempInput, tempOutput];
+    const safeReply = async (text) => {
+        const target = (typeof from !== 'undefined' && from) || msg?.key?.remoteJid;
+        if (!target) return;
+        if (typeof extra?.reply === 'function') {
+            return extra.reply(text);
+        }
+        return sock.sendMessage(target, { text }, { quoted: msg });
+    };
 
     try {
-        const mediaBuffer = await downloadMediaMessage(
-            targetMessage,
-            'buffer',
-            {},
-            { logger: undefined, reuploadRequest: sock.updateMediaMessage },
-        );
+        const chatId = (typeof from !== 'undefined' && from) || msg?.key?.remoteJid;
+        if (!chatId || !msg?.key) return;
 
-        if (!mediaBuffer) {
-            await extra.reply('❌ Failed to download media. Please try again.');
-            return;
+        try {
+            await sock.sendMessage(chatId, {
+                react: { text: '🎨', key: msg.key }
+            });
+        } catch {}
+
+        const unwrap = (mObj) => {
+            let curr = mObj;
+            while (curr && typeof curr === 'object') {
+                if (curr.ephemeralMessage?.message) { curr = curr.ephemeralMessage.message; continue; }
+                if (curr.viewOnceMessage?.message) { curr = curr.viewOnceMessage.message; continue; }
+                if (curr.viewOnceMessageV2?.message) { curr = curr.viewOnceMessageV2.message; continue; }
+                if (curr.viewOnceMessageV2Extension?.message) { curr = curr.viewOnceMessageV2Extension.message; continue; }
+                if (curr.documentWithCaptionMessage?.message) { curr = curr.documentWithCaptionMessage.message; continue; }
+                break;
+            }
+            return curr;
+        };
+
+        const current = unwrap(msg?.message);
+        const quoted =
+            current?.extendedTextMessage?.contextInfo?.quotedMessage ||
+            current?.imageMessage?.contextInfo?.quotedMessage ||
+            current?.videoMessage?.contextInfo?.quotedMessage ||
+            (typeof extra !== 'undefined' ? (extra?.quoted?.message || extra?.quoted) : null) ||
+            null;
+
+        const pickMedia = (mObj) => {
+            const u = unwrap(mObj);
+            if (!u || typeof u !== 'object') return null;
+            if (u.imageMessage) return { node: u.imageMessage, type: 'image' };
+            if (u.videoMessage) return { node: u.videoMessage, type: 'video' };
+            return null;
+        };
+
+        const media = pickMedia(current) || pickMedia(quoted);
+
+        if (!media) {
+            await safeReply('📌 Reply to an image or video, or send one with .sticker');
+            break;
         }
-        if (mediaBuffer.length > MAX_FILE_SIZE) {
-            await extra.reply(`❌ File too large: ${(mediaBuffer.length / 1024 / 1024).toFixed(2)}MB (max: 50MB)`);
-            return;
+
+        const baileys = await import('@whiskeysockets/baileys');
+        const fsMod = await import('fs');
+        const pathMod = await import('path');
+        const osMod = await import('os');
+        const cryptoMod = await import('crypto');
+
+        const fs = fsMod.default || fsMod;
+        const path = pathMod.default || pathMod;
+        const os = osMod.default || osMod;
+        const crypto = cryptoMod.default || cryptoMod;
+
+        const stream = await baileys.downloadContentFromMessage(media.node, media.type);
+        const chunks = [];
+        for await (const chunk of stream) {
+            chunks.push(chunk);
+        }
+        const mediaBuffer = Buffer.concat(chunks);
+
+        if (!mediaBuffer.length) {
+            await safeReply('❌ Downloaded media is empty.');
+            break;
         }
 
-        fs.writeFileSync(tempInput, mediaBuffer);
-        const isAnimated =
-            mediaMessage.mimetype?.includes('gif') ||
-            mediaMessage.mimetype?.includes('video') ||
-            (mediaMessage.seconds || 0) > 0;
-
-        const baseFfmpegCmd = isAnimated
-            ? `"${ffmpegPath}" -y -i "${tempInput}" -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=15,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 75 -compression_level 6 "${tempOutput}"`
-            : `"${ffmpegPath}" -y -i "${tempInput}" -vf "scale=512:512:force_original_aspect_ratio=decrease,format=rgba,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 75 -compression_level 6 "${tempOutput}"`;
-
-        const execPromise = cmd => new Promise((resolve, reject) =>
-            exec(cmd, (err) => err ? reject(err) : resolve())
-        );
-        await execPromise(baseFfmpegCmd);
-        let webpBuffer = fs.readFileSync(tempOutput);
-
-        if (isAnimated && webpBuffer.length > 1000 * 1024) {
-            const tempOutput2 = path.join(os.tmpdir(), `out_fallback_${Date.now()}.webp`);
-            tempFiles.push(tempOutput2);
-            const isLargeFile = mediaBuffer.length / 1024 > 5000;
-            const fallbackCmd = isLargeFile
-                ? `"${ffmpegPath}" -y -i "${tempInput}" -t 2 -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=8,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 30 -compression_level 6 -b:v 100k -max_muxing_queue_size 1024 "${tempOutput2}"`
-                : `"${ffmpegPath}" -y -i "${tempInput}" -t 3 -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=12,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 45 -compression_level 6 -b:v 150k -max_muxing_queue_size 1024 "${tempOutput2}"`;
-            await execPromise(fallbackCmd);
-            if (fs.existsSync(tempOutput2)) webpBuffer = fs.readFileSync(tempOutput2);
+        if (mediaBuffer.length > 50 * 1024 * 1024) {
+            await safeReply('❌ Media is too large (max 50MB).');
+            break;
         }
 
-        await sock.sendMessage(chatId, {
-            sticker: addStickerPackMetadata(webpBuffer)
-        }, { quoted: msg });
-    } catch (error) {
-        console.error('Sticker command error:', error?.stack || error);
-        await extra.reply('❌ Failed to create sticker. Make sure the media is valid.');
-    } finally {
-        for (const file of tempFiles) {
-            try { if (fs.existsSync(file)) fs.unlinkSync(file); }
-            catch (cleanupError) { console.error('[STICKER CLEANUP]', cleanupError?.message || cleanupError); }
+        let webpBuffer;
+
+        if (media.type === 'image') {
+            const sharpMod = await import('sharp');
+            const sharp = sharpMod.default || sharpMod;
+
+            webpBuffer = await sharp(mediaBuffer)
+                .resize(512, 512, {
+                    fit: 'contain',
+                    background: { r: 0, g: 0, b: 0, alpha: 0 }
+                })
+                .webp({ quality: 75 })
+                .toBuffer();
+        } else {
+            const { execFile } = await import('child_process');
+            const { promisify } = await import('util');
+            const execFileAsync = promisify(execFile);
+
+            let ffBin = 'ffmpeg';
+            try {
+                const ffStatic = await import('ffmpeg-static');
+                if (ffStatic?.default) ffBin = ffStatic.default;
+            } catch {}
+
+            const id = crypto.randomUUID();
+            const inFile = path.join(os.tmpdir(), `stk_in_${id}.mp4`);
+            const outFile = path.join(os.tmpdir(), `stk_out_${id}.webp`);
+
+            try {
+                fs.writeFileSync(inFile, mediaBuffer);
+                if (ffBin !== 'ffmpeg' && fs.existsSync(ffBin)) {
+                    try { fs.chmodSync(ffBin, 0o755); } catch {}
+                }
+
+                const vf = 'fps=15,scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000';
+
+                await execFileAsync(ffBin, [
+                    '-y', '-i', inFile, '-t', '6',
+                    '-vf', vf,
+                    '-c:v', 'libwebp', '-preset', 'default',
+                    '-loop', '0', '-vsync', '0',
+                    '-pix_fmt', 'yuva420p', '-quality', '65',
+                    '-compression_level', '6', '-an',
+                    outFile
+                ], { timeout: 120000, maxBuffer: 10 * 1024 * 1024 });
+
+                webpBuffer = fs.readFileSync(outFile);
+            } finally {
+                for (const f of [inFile, outFile]) {
+                    try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {}
+                }
+            }
         }
+
+        try {
+            const webpMod = await import('node-webpmux');
+            const webp = webpMod.default || webpMod;
+            const img = new webp.Image();
+            await img.load(webpBuffer);
+
+            const json = {
+                'sticker-pack-id': crypto.randomBytes(16).toString('hex'),
+                'sticker-pack-name': '𝙂𝙍𝙀𝘼𝙏 𝘿𝙀𝙈𝙊𝙉 𝙑4.9 𝘽𝙊𝙏 ❤️‍🔥',
+                'sticker-pack-publisher': '𝒔𝒕𝒊𝒄𝒌𝒆𝒓 𝒄𝒐𝒏𝒗𝒆𝒓𝒕 💫',
+                emojis: ['❤️‍🔥', '💫']
+            };
+
+            const exifAttr = Buffer.from([
+                0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x16, 0x00, 0x00, 0x00
+            ]);
+            const jsonBuff = Buffer.from(JSON.stringify(json), 'utf8');
+            const exif = Buffer.concat([exifAttr, jsonBuff]);
+            exif.writeUIntLE(jsonBuff.length, 14, 4);
+
+            img.exif = exif;
+            webpBuffer = await img.save(null);
+        } catch (exifErr) {
+            console.warn('[STICKER EXIF]', exifErr?.message || exifErr);
+        }
+
+        await sock.sendMessage(chatId, { sticker: webpBuffer }, { quoted: msg });
+    } catch (err) {
+        console.error('[STICKER FATAL]', err);
+        await safeReply(`❌ Sticker error: ${err?.message || String(err)}`);
     }
     break;
 }
+
 
             case 'toimg': {
                 const isSticker = msg.message?.stickerMessage || msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.stickerMessage;
